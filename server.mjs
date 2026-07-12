@@ -58,9 +58,16 @@ async function serveStatic(req, res) {
   }
 }
 
+const stamp = () => new Date().toISOString().slice(11, 19);
+const logReq = (path, extra = "") => {
+  if (path.startsWith("/api") || path === "/oauth/callback") console.log(`  [${stamp()}] ${path}${extra ? " " + extra : ""}`);
+};
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const path = url.pathname;
+  const q = url.searchParams.get("server");
+  logReq(path, q ? `server=${q}` : "");
 
   try {
     if (path === "/api/health") return json(res, 200, { ok: true, mode: "feastmode" });
