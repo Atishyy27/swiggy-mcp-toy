@@ -116,6 +116,25 @@ body{
 .modal-empty{text-align:center;color:var(--muted);font-family:var(--mono);font-size:13px;padding:40px 10px;line-height:1.7}
 .modal-empty b{color:var(--ink)}
 
+/* veg toggle + address picker */
+.addr-sel{font-family:var(--mono);font-size:12px;background:var(--panel-2);color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:8px 13px;max-width:240px;cursor:pointer}
+.addr-sel:focus{outline:0;border-color:var(--fire)}
+#vegToggle button[data-veg="1"].active{background:var(--good);color:#04240f}
+.optrow{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
+
+/* combo chooser */
+.combos-box{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);max-height:44%;overflow-y:auto}
+.combos-box .hd{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--gold);text-transform:uppercase}
+.combo-card{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--panel-2);cursor:pointer;transition:.16s}
+.combo-card:hover{border-color:var(--gold);transform:translateX(2px)}
+.combo-card.sel{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+.combo-card .cl{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.combo-card .cl b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--fire-2)}
+.combo-card .cl .tot{font-family:var(--mono);font-weight:700;color:var(--gold);font-variant-numeric:tabular-nums}
+.combo-card .ci{color:var(--muted);font-size:12px;margin-top:5px;line-height:1.5}
+.bill{font-family:var(--mono);font-size:13px;white-space:pre-wrap;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:14px;line-height:1.6}
+.warn{font-family:var(--mono);font-size:12.5px;color:var(--fire-2);border:1px solid rgba(255,90,31,.35);border-radius:10px;padding:11px 13px;line-height:1.5}
+
 /* ---------- idle / briefing ---------- */
 .stage{flex:1;position:relative;overflow:hidden}
 .briefing{
@@ -351,6 +370,15 @@ body{
           <input type="range" id="budget" min="150" max="2500" step="50" value="800" />
           <b id="budgetVal">Rs 800</b>
         </div>
+        <div class="optrow">
+          <div class="vert-switch" id="vegToggle">
+            <button class="active" data-veg="0">ALL</button>
+            <button data-veg="1">VEG ONLY</button>
+          </div>
+          <select id="addrSel" class="addr-sel" title="Delivery address (LIVE)">
+            <option value="">CONNECT for saved addresses</option>
+          </select>
+        </div>
       </div>
     </section>
 
@@ -379,6 +407,7 @@ body{
 
       <div class="panel gold">
         <h3><span class="tick"></span> The haul</h3>
+        <div id="combos" class="combos-box" style="display:none"></div>
         <div id="cart"></div>
         <div class="haul-foot">
           <div class="meter save"><span class="lbl">Loot saved</span><span class="val" id="saveVal">Rs 0</span></div>
@@ -416,6 +445,20 @@ body{
       <button id="toolsClose">CLOSE</button>
     </div>
     <div class="modal-body" id="toolsBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="orderModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>CONFIRM <span>REAL ORDER</span></h3>
+      <button id="orderClose">CLOSE</button>
+    </div>
+    <div class="modal-body" id="orderBody"></div>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:10px">
+      <button id="orderCancel" class="again" style="flex:1">CANCEL &amp; FLUSH</button>
+      <button id="orderPlace" class="execute ready" style="flex:1">PLACE REAL ORDER</button>
+    </div>
   </div>
 </div>
 
@@ -468,6 +511,7 @@ const shuffle=a=>a.map(v=>[Math.random(),v]).sort((x,y)=>x[0]-y[0]).map(v=>v[1])
 const $=s=>document.querySelector(s);
 const briefing=$("#briefing"),mission=$("#mission"),feed=$("#feed"),dealsBox=$("#deals"),cartBox=$("#cart"),radarCap=$("#radarCap");
 let MODE="demo",SERVER="food",connected=false,budget=800,busy=false,timer=null,t0=0;
+let VEG=0,addrId="",orderCtx=null,curCombo=null;
 let count={kitchens:0,deals:0,calls:0},total=0,saved=0,lastQuery="";
 
 /* ===================== budget + chips + mode ===================== */
@@ -486,6 +530,23 @@ $("#vertSwitch").addEventListener("click",e=>{
   refreshConn();
 });
 
+/* veg toggle + address picker */
+$("#vegToggle").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b||busy)return;
+  VEG=+b.dataset.veg;[...$("#vegToggle").children].forEach(x=>x.classList.toggle("active",x===b));
+});
+$("#addrSel").addEventListener("change",e=>{addrId=e.target.value;});
+async function loadAddresses(){
+  const sel=$("#addrSel");
+  try{
+    const r=await fetch(`/api/addresses?server=${SERVER}`);if(!r.ok)throw 0;
+    const d=await r.json();const list=d.addresses||[];
+    if(!list.length){sel.innerHTML='<option value="">no saved address</option>';return;}
+    sel.innerHTML=list.map((a,i)=>`<option value="${a.id}">${(a.tag||"addr")} // ${a.addr.slice(0,30)}</option>`).join("");
+    addrId=list[0].id;
+  }catch(e){sel.innerHTML='<option value="">CONNECT for saved addresses</option>';}
+}
+
 /* ---- in-app OAuth: connect / disconnect ---- */
 const connBtn=$("#connBtn"),connLbl=connBtn.querySelector("span");
 function setConn(state,label){connBtn.className="conn-btn"+(state?" "+state:"");connLbl.textContent=label;}
@@ -494,6 +555,7 @@ async function refreshConn(){
     const r=await fetch(`/api/auth/status?server=${SERVER}`);const d=await r.json();
     connected=!!d.connected;
     setConn(connected?"on":"", connected?`CONNECTED // ${SERVER.toUpperCase()}`:"CONNECT SWIGGY");
+    if(connected)loadAddresses();
   }catch(e){connected=false;setConn("","CONNECT (start server)");}
 }
 connBtn.addEventListener("click",async()=>{
@@ -551,7 +613,10 @@ $("#craving").addEventListener("keydown",e=>{if(e.key==="Enter")launch();});
 $("#engage").addEventListener("click",launch);
 $("#again").addEventListener("click",goHome);
 $("#homeBtn").addEventListener("click",goHome);
-$("#execute").addEventListener("click",()=>{burst();toast(MODE==="live"?"LIVE order would place now (COD). Wire place_food_order to confirm.":"DEMO order locked. Flip to LIVE + login to actually order.");});
+$("#execute").addEventListener("click",onExecute);
+$("#orderClose").addEventListener("click",closeOrder);
+$("#orderCancel").addEventListener("click",cancelAndFlush);
+$("#orderPlace").addEventListener("click",placeRealOrder);
 
 /* ===================== feed + tools helpers ===================== */
 function log(msg,cls=""){
@@ -611,9 +676,10 @@ async function launch(){
   t0=performance.now();
   timer=setInterval(()=>$("#stTime").textContent=((performance.now()-t0)/1000).toFixed(1),100);
   feed.innerHTML="";dealsBox.innerHTML="";cartBox.innerHTML="";blips=[];radarOn=true;
+  $("#combos").style.display="none";$("#combos").innerHTML="";curCombo=null;orderCtx=null;
   count={kitchens:0,deals:0,calls:0};total=0;saved=0;setStat();
   ["search","menu","deals","cart","order"].forEach(t=>tool(t,""));
-  $("#execute").classList.remove("ready");$("#stamp").classList.remove("on");
+  $("#execute").classList.remove("ready");$("#execute").textContent="EXECUTE ORDER // COD";$("#stamp").classList.remove("on");
   $("#saveVal").textContent="Rs 0";$("#totalVal").textContent="Rs 0";$("#gauge").style.width="0%";
 
   try{
@@ -628,7 +694,8 @@ function goHome(){
   aborted=true;radarOn=false;clearInterval(timer);
   if(liveES){try{liveES.close()}catch(e){}liveES=null;}
   busy=false;$("#engage").textContent="ENGAGE";$("#homeBtn").style.display="none";
-  mission.classList.remove("on");$("#stamp").classList.remove("on");
+  mission.classList.remove("on");$("#stamp").classList.remove("on");$("#orderModal").classList.remove("on");
+  $("#combos").style.display="none";$("#combos").innerHTML="";curCombo=null;orderCtx=null;
   setTimeout(()=>briefing.classList.remove("hide"),240);
   $("#craving").focus();
 }
@@ -671,54 +738,123 @@ async function runSim(q){
   }
   tool("deals","done");log(`vault cracked // <span class="k">${count.deals}</span> exploits stacked`,"win");await sleep(280);
 
-  // cart / basket / booking
-  tool("cart","run");count.calls++;setStat();radarCap.textContent=`assembling optimal ${V.unit}...`;
-  log(`call <span class="k">${cartName}</span>() // optimizing under Rs ${budget}`,"");
-  // fill the cart toward the budget cap (not just 3 items)
-  let items;
-  if(SERVER==="dineout"){items=V.pick(q);}
-  else{
-    const pool=[...V.pick(q)].sort((a,b)=>b[2]-a[2]);let t=0,guard=0;items=[];
-    while(t<budget*0.8&&items.length<8&&guard++<60){
-      const cand=pool[Math.floor(Math.random()*pool.length)];
-      if(t+cand[2]>budget){if(items.length>=2)break;else continue;}
-      items.push(cand);t+=cand[2];
-    }
-    if(!items.length)items.push(pool[pool.length-1]);
-  }
-  for(const [name,emoji,price,orig] of items){
-    total+=price;
-    const el=document.createElement("div");el.className="item";
-    const px=price?`<b>Rs ${price}</b> ${orig?`<s>Rs ${orig}</s>`:""}`:`<b style="color:var(--good)">FREE</b>`;
-    el.innerHTML=`<span class="emoji">${emoji}</span><div class="info"><b>${name}</b><small>${shuffle(V.stores)[0]}</small></div><div class="px">${px}</div>`;
-    cartBox.appendChild(el);cartBox.scrollTop=cartBox.scrollHeight;
-    log(`  + ${name}${price?" @ Rs "+price:" // free"}`,"");
-    animateVal($("#totalVal"),total-price,total,v=>"Rs "+v);
-    $("#gauge").style.width=Math.min(100,budget?total/budget*100:0)+"%";
-    await sleep(rnd(340,560));
-  }
+  // formations (P&C combos under the cap)
+  tool("cart","run");count.calls++;setStat();radarCap.textContent="computing formations...";
+  log(`call <span class="k">${cartName}</span>() // formations under Rs ${budget}`,"");
   animateVal($("#saveVal"),0,saved,v=>"Rs "+v);
-  tool("cart","done");
-  log(`${V.unit} optimized // total Rs ${total} // saved Rs ${saved}`,"win");await sleep(300);
+  await sleep(500);
+  const combos=demoCombos(q,budget);
+  tool("cart","done");tool("order","done");
+  log(`built <span class="k">${combos.length}</span> formations // pick one`,"win");
+  showCombos({orderable:false,restaurant:{name:shuffle(V.stores)[0]},combos});
+}
 
-  tool("order","run");log(`staging <span class="k">${orderName}</span>() // payment: COD`,"fire");await sleep(500);
-  tool("order","done");log("READY // awaiting your EXECUTE","win");
+function demoPool(){
+  if(SERVER==="instamart")return GROCERY.map(([n,e,p])=>({name:n,emoji:e,price:p}));
+  if(SERVER==="dineout")return TABLES.map(([n,e,p])=>({name:n,emoji:e,price:p}));
+  return [].concat(...Object.values(DISHES)).map(([n,e,p])=>({name:n,emoji:e,price:p}));
+}
+function demoCombos(q,budget){
+  if(SERVER==="dineout")return [{label:"BOOKING",total:0,items:TABLES.slice(0,2).map(([n,e,p])=>({name:n,emoji:e,price:p,quantity:1}))}];
+  const pool=demoPool().filter(i=>i.price>0&&i.price<=budget);
+  const words=q.toLowerCase().split(/\s+/).filter(w=>w.length>2);
+  const craving=it=>words.some(w=>it.name.toLowerCase().includes(w));
+  const fill=sorted=>{const seen=new Set(),items=[];let t=0;for(const it of sorted){if(seen.has(it.name)||t+it.price>budget)continue;items.push({...it,quantity:1});seen.add(it.name);t+=it.price;if(items.length>=6&&t>=budget*0.8)break;}return {items,total:t};};
+  const rot=(a,n)=>a.slice(n).concat(a.slice(0,n));
+  const byC=[...pool].sort((a,b)=>craving(b)-craving(a)||b.price-a.price);
+  const byBig=[...pool].sort((a,b)=>b.price-a.price),bySmall=[...pool].sort((a,b)=>a.price-b.price);
+  const raw=[{label:craving(byC[0])?"CRAVING MATCH":"CHEF'S PICK",...fill(byC)},{label:"BIG MAINS",...fill(byBig)},{label:"MAX VARIETY",...fill(bySmall)},{label:"WILDCARD",...fill(rot(byC,2))}];
+  const seen=new Set(),out=[];
+  for(const c of raw){if(!c.items.length)continue;const k=c.items.map(i=>i.name).sort().join(",");if(seen.has(k))continue;seen.add(k);out.push(c);}
+  return out.slice(0,4);
 }
 
 function finish(){
-  radarOn=false;radarCap.textContent="cart locked";
-  clearInterval(timer);busy=false;$("#engage").textContent="ENGAGE";
+  radarOn=false;clearInterval(timer);busy=false;$("#engage").textContent="ENGAGE";
+  if($("#combos").children.length){radarCap.textContent="pick a formation";}
+  else radarCap.textContent="cart locked";
+}
+
+/* ---- combo chooser ("P&C formations") ---- */
+function showCombos(payload){
+  orderCtx={orderable:!!payload.orderable,restaurant:payload.restaurant||{},addressId:payload.addressId||addrId,addressLabel:payload.addressLabel||""};
+  curCombo=null;
+  const box=$("#combos");box.style.display="";
+  box.innerHTML=`<div class="hd">choose your formation // ${payload.combos.length} options ${orderCtx.orderable?"// tap to order":""}</div>`;
+  payload.combos.forEach((c,i)=>{
+    const el=document.createElement("div");el.className="combo-card";
+    el.innerHTML=`<div class="cl"><b>${c.label}</b><span class="tot">Rs ${c.total}</span></div>
+      <div class="ci">${c.items.map(it=>`${it.emoji} ${it.name}`).join(" &middot; ").slice(0,180)}</div>`;
+    el.addEventListener("click",()=>selectCombo(c,el));
+    box.appendChild(el);
+  });
+  radarCap.textContent="pick a formation";
+}
+function selectCombo(combo,el){
+  curCombo=combo;
+  [...$("#combos").querySelectorAll(".combo-card")].forEach(x=>x.classList.toggle("sel",x===el));
+  cartBox.innerHTML="";total=0;
+  for(const it of combo.items){
+    total+=it.price;
+    const d=document.createElement("div");d.className="item";
+    d.innerHTML=`<span class="emoji">${it.emoji}</span><div class="info"><b>${it.name}</b><small>${orderCtx.restaurant.name||"combo"}</small></div><div class="px"><b>Rs ${it.price}</b></div>`;
+    cartBox.appendChild(d);
+  }
+  animateVal($("#totalVal"),0,total,v=>"Rs "+v);
+  $("#gauge").style.width=Math.min(100,budget?total/budget*100:0)+"%";
   $("#execute").classList.add("ready");
-  $("#stampBig").textContent="CART LOCKED";
-  $("#stampSub").textContent=`Rs ${total} total // Rs ${saved} looted // ${count.deals} exploits`;
-  setTimeout(()=>{$("#stamp").classList.add("on");burst();setTimeout(()=>$("#stamp").classList.remove("on"),2600);},400);
+  $("#execute").textContent=orderCtx.orderable?"EXECUTE ORDER // COD":"EXECUTE (DEMO)";
+}
+
+/* ---- the 2-step real order ---- */
+async function onExecute(){
+  if(!curCombo){toast("pick a formation first");return;}
+  if(!(MODE==="live"&&orderCtx.orderable&&connected)){
+    burst();orderDone("FORMATION LOCKED",`Rs ${total} // ${curCombo.items.length} items // demo`);
+    return;
+  }
+  toast("staging cart on Swiggy...");
+  $("#execute").textContent="STAGING...";
+  let d;
+  try{
+    d=await(await fetch("/api/order/stage",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({server:SERVER,addressId:orderCtx.addressId,restaurantId:orderCtx.restaurant.id,items:curCombo.items})})).json();
+  }catch(e){$("#execute").textContent="EXECUTE ORDER // COD";return toast("stage failed // backend unreachable");}
+  $("#execute").textContent="EXECUTE ORDER // COD";
+  if(d.error||!d.ok){return toast("stage error // "+(d.error||"unknown"));}
+  const bill=(d.cart||d.updated||"").replace(/\n?Cart widget[\s\S]*$/i,"").replace(/⚠️[\s\S]*$/,"").trim();
+  $("#orderBody").innerHTML=`<div class="warn">This places a REAL Swiggy order for real food, payment CASH ON DELIVERY, to [${orderCtx.addressLabel||"your address"}]. Review the real bill below.</div>
+    <div class="bill">${bill||"(cart staged)"}</div>`;
+  $("#orderModal").classList.add("on");
+}
+function closeOrder(){$("#orderModal").classList.remove("on");}
+async function cancelAndFlush(){
+  closeOrder();
+  try{await fetch("/api/order/cancel",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({server:SERVER})});}catch(e){}
+  toast("cart flushed // nothing ordered");
+}
+async function placeRealOrder(){
+  $("#orderPlace").textContent="PLACING...";
+  let d;
+  try{
+    d=await(await fetch("/api/order/place",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({server:SERVER,addressId:orderCtx.addressId})})).json();
+  }catch(e){$("#orderPlace").textContent="PLACE REAL ORDER";return toast("place failed // backend unreachable");}
+  $("#orderPlace").textContent="PLACE REAL ORDER";
+  closeOrder();
+  if(d.error||!d.ok){return toast("order error // "+(d.error||"unknown"));}
+  burst();orderDone("ORDER PLACED","real Swiggy order // COD // check the app");
+}
+function orderDone(title,sub){
+  $("#stampBig").textContent=title;$("#stampSub").textContent=sub;
+  $("#stamp").classList.add("on");burst();setTimeout(()=>$("#stamp").classList.remove("on"),3200);
 }
 
 /* ===================== LIVE mode (real Swiggy MCP via backend) ===================== */
 async function tryLive(q){
   return new Promise(resolve=>{
     let got=false,es;
-    try{es=new EventSource(`/api/feast?server=${SERVER}&q=${encodeURIComponent(q)}&budget=${budget}`);}catch(e){return resolve(false);}
+    try{es=new EventSource(`/api/feast?server=${SERVER}&q=${encodeURIComponent(q)}&budget=${budget}&veg=${VEG}&addressId=${encodeURIComponent(addrId)}`);}catch(e){return resolve(false);}
     liveES=es;
     const fail=setTimeout(()=>{if(!got){try{es.close()}catch(e){};resolve(false);}},2500);
     es.onmessage=ev=>{
@@ -730,7 +866,8 @@ async function tryLive(q){
       else if(d.type==="deal"){count.deals++;setStat();addBlip(d.gold);const el=document.createElement("div");el.className="deal"+(d.gold?" gold":"");el.innerHTML=`<div class="tag">${d.tag||"DEAL"}</div><div class="name">${d.name}</div><div class="save">- Rs ${d.save||0}</div>`;dealsBox.appendChild(el);saved+=d.save||0;}
       else if(d.type==="item"){total+=d.price;const el=document.createElement("div");el.className="item";el.innerHTML=`<span class="emoji">${d.emoji||"🍽️"}</span><div class="info"><b>${d.name}</b><small>${d.from||"live"}</small></div><div class="px"><b>Rs ${d.price}</b></div>`;cartBox.appendChild(el);animateVal($("#totalVal"),total-d.price,total,v=>"Rs "+v);$("#gauge").style.width=Math.min(100,total/budget*100)+"%";}
       else if(d.type==="call")count.calls++,setStat();
-      else if(d.type==="done"){animateVal($("#saveVal"),0,saved,v=>"Rs "+v);es.close();resolve(true);}
+      else if(d.type==="combos"){showCombos(d);}
+      else if(d.type==="done"){es.close();resolve(true);}
       else if(d.type==="fallback"){try{es.close()}catch(e){};resolve(false);}
       else if(d.type==="error"){log("LIVE // "+d.msg,"fire");}
     };
