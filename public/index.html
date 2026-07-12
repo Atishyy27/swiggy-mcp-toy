@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FEASTMODE // autonomous craving execution</title>
+<meta name="description" content="Give it a vibe and a budget. Watch an AI food-agent heist through kitchens, crack deals, and build your cart live. Built on Swiggy MCP." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --ground:#0d0710;
+  --ground-2:#120a17;
+  --panel:#17101c;
+  --panel-2:#1d1424;
+  --line:#2c2033;
+  --ink:#f4ecf5;
+  --muted:#9a8aa6;
+  --dim:#6a5c74;
+  --fire:#ff5a1f;
+  --fire-2:#ff7a3c;
+  --gold:#ffca3a;
+  --machine:#6ea8ff;
+  --machine-2:#9cc4ff;
+  --good:#57e39b;
+  --danger:#ff3b57;
+  --radius:14px;
+  --mono:"Space Mono",ui-monospace,Menlo,Consolas,monospace;
+  --ui:"Chakra Petch",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:var(--ui);overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+#fx{position:fixed;inset:0;z-index:0;pointer-events:none}
+.wrap{position:relative;z-index:2;height:100vh;height:100dvh;display:flex;flex-direction:column}
+
+/* ---------- ambient background ---------- */
+.grid-floor{
+  position:fixed;left:0;right:0;bottom:0;height:46vh;z-index:1;pointer-events:none;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:44px 44px;
+  transform:perspective(340px) rotateX(66deg);transform-origin:bottom;
+  opacity:.28;mask-image:linear-gradient(to top,#000 0%,transparent 82%);
+}
+.ember-glow{
+  position:fixed;z-index:1;pointer-events:none;left:50%;bottom:-14vh;width:70vw;height:52vh;
+  transform:translateX(-50%);
+  background:radial-gradient(50% 60% at 50% 100%,rgba(255,90,31,.34),rgba(255,90,31,0) 70%);
+  filter:blur(6px);
+}
+
+/* ---------- top bar ---------- */
+.topbar{
+  display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(23,16,28,.9),rgba(13,7,16,.4));backdrop-filter:blur(6px);
+}
+.brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:.14em}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--fire);box-shadow:0 0 14px var(--fire);animation:beat 1.6s infinite}
+@keyframes beat{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+.brand b{font-size:16px}
+.brand small{color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.05em}
+.topbar .spacer{flex:1}
+.pill{
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:5px 11px;display:flex;align-items:center;gap:7px;
+}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block}
+.pill.on i{background:var(--good);box-shadow:0 0 10px var(--good)}
+.mode-toggle{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-family:var(--mono);font-size:11px}
+.mode-toggle button{
+  background:transparent;color:var(--muted);border:0;padding:6px 13px;cursor:pointer;letter-spacing:.09em;
+}
+.mode-toggle button.active{background:var(--fire);color:#160a05;font-weight:700}
+.mode-toggle button.live.active{background:var(--machine);color:#06121f}
+
+/* ---------- idle / briefing ---------- */
+.stage{flex:1;position:relative;overflow:hidden}
+.briefing{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:26px;padding:24px;text-align:center;transition:opacity .5s,transform .5s;
+}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.42em;color:var(--fire);text-transform:uppercase}
+.wordmark{
+  font-weight:700;line-height:.9;letter-spacing:.02em;margin:0;
+  font-size:clamp(58px,13vw,168px);
+  background:linear-gradient(180deg,#fff,#ffd9c4 40%,var(--fire) 118%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 0 60px rgba(255,90,31,.22);position:relative;
+}
+.wordmark[data-glitch]::before,.wordmark[data-glitch]::after{
+  content:attr(data-glitch);position:absolute;inset:0;-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.wordmark[data-glitch]::before{background:var(--machine);mix-blend-mode:screen;animation:gl1 4.5s infinite steps(2)}
+.wordmark[data-glitch]::after{background:var(--gold);mix-blend-mode:screen;animation:gl2 5.7s infinite steps(2)}
+@keyframes gl1{0%,92%,100%{transform:translate(0);opacity:0}93%{transform:translate(-3px,1px);opacity:.5}96%{transform:translate(2px,-2px);opacity:.4}}
+@keyframes gl2{0%,90%,100%{transform:translate(0);opacity:0}91%{transform:translate(3px,-1px);opacity:.45}95%{transform:translate(-2px,2px);opacity:.35}}
+.tagline{color:var(--muted);max-width:52ch;font-size:16px;line-height:1.5;text-wrap:balance}
+.tagline b{color:var(--ink);font-weight:600}
+
+.console-in{width:min(760px,92vw);display:flex;flex-direction:column;gap:14px}
+.cmd{
+  display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);padding:6px 6px 6px 18px;box-shadow:0 22px 60px rgba(0,0,0,.5);
+  transition:border-color .2s,box-shadow .2s;
+}
+.cmd:focus-within{border-color:var(--fire);box-shadow:0 0 0 3px rgba(255,90,31,.16),0 22px 60px rgba(0,0,0,.5)}
+.cmd .caret{font-family:var(--mono);color:var(--fire);font-weight:700}
+.cmd input{
+  flex:1;background:transparent;border:0;outline:0;color:var(--ink);font-family:var(--ui);
+  font-size:18px;letter-spacing:.01em;padding:14px 0;
+}
+.cmd input::placeholder{color:var(--dim)}
+.engage{
+  border:0;cursor:pointer;font-family:var(--ui);font-weight:700;letter-spacing:.12em;font-size:15px;
+  color:#160a05;background:linear-gradient(180deg,var(--fire-2),var(--fire));
+  padding:15px 26px;border-radius:10px;white-space:nowrap;
+  box-shadow:0 0 0 0 rgba(255,90,31,.5);transition:transform .12s,box-shadow .3s,filter .2s;
+}
+.engage:hover{filter:brightness(1.08);box-shadow:0 0 34px rgba(255,90,31,.55)}
+.engage:active{transform:translateY(1px) scale(.99)}
+
+.row{display:flex;flex-wrap:wrap;gap:9px;align-items:center;justify-content:center}
+.chip{
+  font-family:var(--mono);font-size:12px;letter-spacing:.03em;color:var(--muted);cursor:pointer;
+  border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:8px 13px;
+  transition:.16s;
+}
+.chip:hover{color:var(--ink);border-color:var(--fire);transform:translateY(-1px)}
+
+.budget{display:flex;align-items:center;gap:14px;justify-content:center;font-family:var(--mono);font-size:13px;color:var(--muted)}
+.budget input[type=range]{-webkit-appearance:none;appearance:none;width:230px;height:4px;border-radius:4px;
+  background:linear-gradient(90deg,var(--fire),var(--gold));outline:0}
+.budget input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+  background:#fff;border:3px solid var(--fire);cursor:pointer;box-shadow:0 0 12px rgba(255,90,31,.7)}
+.budget input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--fire);cursor:pointer}
+.budget b{color:var(--gold);font-size:17px;min-width:78px;text-align:right;font-variant-numeric:tabular-nums}
+
+/* ---------- mission HUD ---------- */
+.mission{position:absolute;inset:0;display:grid;grid-template-columns:minmax(280px,1fr) 1.25fr minmax(300px,1fr);
+  grid-template-rows:1fr auto;gap:14px;padding:16px;opacity:0;pointer-events:none;
+  transform:translateY(10px);transition:opacity .55s,transform .55s}
+.mission.on{opacity:1;pointer-events:auto;transform:none}
+.briefing.hide{opacity:0;transform:scale(.97);pointer-events:none}
+
+.panel{background:linear-gradient(180deg,var(--panel),var(--ground-2));border:1px solid var(--line);
+  border-radius:var(--radius);display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative}
+.panel > h3{
+  margin:0;padding:12px 15px;font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--muted);
+  text-transform:uppercase;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;flex:none;
+}
+.panel > h3 .tick{width:6px;height:6px;border-radius:50%;background:var(--fire);box-shadow:0 0 8px var(--fire)}
+.panel.machine > h3 .tick{background:var(--machine);box-shadow:0 0 8px var(--machine)}
+.panel.gold > h3 .tick{background:var(--gold);box-shadow:0 0 8px var(--gold)}
+
+/* agent feed */
+#feed{flex:1;overflow-y:auto;padding:14px 15px;font-family:var(--mono);font-size:12.5px;line-height:1.85;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+#feed::-webkit-scrollbar{width:8px}#feed::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+.log{display:flex;gap:9px;opacity:0;transform:translateX(-6px);animation:in .3s forwards}
+@keyframes in{to{opacity:1;transform:none}}
+.log .t{color:var(--dim);flex:none}
+.log .m{color:var(--machine-2)}
+.log.sys .m{color:var(--muted)}
+.log.hit .m{color:var(--gold)}
+.log.win .m{color:var(--good)}
+.log.fire .m{color:var(--fire-2)}
+.log .m .k{color:var(--fire);font-weight:700}
+.chips-tools{display:flex;flex-wrap:wrap;gap:7px;padding:11px 15px;border-top:1px solid var(--line);flex:none}
+.tchip{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--dim);border:1px solid var(--line);
+  border-radius:6px;padding:5px 9px;transition:.25s;display:flex;align-items:center;gap:6px}
+.tchip i{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+.tchip.run{color:var(--machine);border-color:var(--machine)}.tchip.run i{background:var(--machine);animation:beat 1s infinite}
+.tchip.done{color:var(--good);border-color:rgba(87,227,155,.4)}.tchip.done i{background:var(--good)}
+
+/* radar */
+.radar-wrap{flex:1;position:relative;display:flex;align-items:center;justify-content:center;padding:10px}
+#radar{max-width:100%;max-height:100%}
+.radar-cap{position:absolute;left:15px;bottom:12px;font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.06em}
+.deals-strip{display:flex;gap:9px;padding:11px 14px;border-top:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:none}
+.deals-strip::-webkit-scrollbar{display:none}
+.deal{flex:none;min-width:172px;background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--fire);
+  border-radius:9px;padding:10px 12px;opacity:0;transform:translateY(8px) scale(.96);animation:pop .4s forwards}
+@keyframes pop{to{opacity:1;transform:none}}
+.deal .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--fire);font-weight:700}
+.deal .name{font-weight:600;font-size:13px;margin:3px 0 5px;line-height:1.25}
+.deal .save{font-family:var(--mono);font-size:11px;color:var(--gold)}
+.deal.gold{border-left-color:var(--gold)}.deal.gold .tag{color:var(--gold)}
+
+/* haul / cart */
+#cart{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:9px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+#cart::-webkit-scrollbar{width:8px}#cart::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+.item{display:flex;align-items:center;gap:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;opacity:0;transform:translateX(14px);animation:slidein .42s cubic-bezier(.2,.9,.25,1) forwards}
+@keyframes slidein{to{opacity:1;transform:none}}
+.item .emoji{font-size:22px;filter:drop-shadow(0 0 8px rgba(255,90,31,.4))}
+.item .info{flex:1;min-width:0}
+.item .info b{font-weight:600;font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .info small{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.item .px{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.item .px b{color:var(--ink);font-size:13px}
+.item .px s{color:var(--dim);font-size:10.5px}
+.haul-foot{border-top:1px solid var(--line);padding:14px;flex:none;display:flex;flex-direction:column;gap:12px}
+.meter{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono)}
+.meter .lbl{font-size:11px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.meter .val{font-variant-numeric:tabular-nums;font-size:20px;font-weight:700}
+.meter.total .val{color:var(--ink)}
+.meter.save .val{color:var(--gold);text-shadow:0 0 18px rgba(255,202,58,.4)}
+.budget-gauge{height:6px;border-radius:6px;background:var(--line);overflow:hidden}
+.budget-gauge i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--good),var(--gold),var(--fire));transition:width .6s}
+.execute{border:0;cursor:pointer;font-family:var(--ui);font-weight:700;letter-spacing:.1em;font-size:14px;
+  color:#160a05;background:linear-gradient(180deg,var(--gold),#f0a800);padding:15px;border-radius:11px;
+  opacity:.4;pointer-events:none;transition:.3s}
+.execute.ready{opacity:1;pointer-events:auto;box-shadow:0 0 30px rgba(255,202,58,.4)}
+.execute.ready:hover{filter:brightness(1.06)}
+
+/* telemetry */
+.telemetry{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
+  background:linear-gradient(180deg,var(--panel),var(--ground-2));border:1px solid var(--line);border-radius:var(--radius);padding:13px 18px}
+.stat{display:flex;flex-direction:column;gap:3px}
+.stat .k{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+.stat .v{font-family:var(--mono);font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
+.stat.fire .v{color:var(--fire-2)}.stat.machine .v{color:var(--machine-2)}.stat.gold .v{color:var(--gold)}
+.stat .v small{font-size:12px;color:var(--dim);font-weight:400}
+
+/* complete stamp */
+.stamp{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .4s}
+.stamp.on{opacity:1}
+.stamp .card{background:rgba(19,10,23,.86);border:1px solid var(--line);border-radius:18px;padding:34px 46px;
+  text-align:center;backdrop-filter:blur(8px);box-shadow:0 30px 90px rgba(0,0,0,.6);transform:scale(.9);transition:transform .5s cubic-bezier(.2,1.3,.4,1)}
+.stamp.on .card{transform:scale(1)}
+.stamp .big{font-weight:700;font-size:clamp(30px,5vw,52px);letter-spacing:.04em;
+  background:linear-gradient(180deg,#fff,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.stamp .sub{font-family:var(--mono);color:var(--muted);font-size:13px;margin-top:8px}
+.stamp .again{margin-top:20px;border:1px solid var(--line);background:transparent;color:var(--ink);font-family:var(--mono);
+  font-size:12px;letter-spacing:.1em;padding:11px 20px;border-radius:9px;cursor:pointer;transition:.2s}
+.stamp .again:hover{border-color:var(--fire);color:var(--fire-2)}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);z-index:20;
+  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--machine);border-radius:11px;
+  padding:13px 18px;font-family:var(--mono);font-size:12.5px;color:var(--ink);opacity:0;pointer-events:none;
+  transition:.3s;max-width:88vw;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.toast.on{opacity:1;transform:translateX(-50%)}
+
+.footer-note{position:fixed;right:14px;bottom:10px;z-index:3;font-family:var(--mono);font-size:10.5px;color:var(--dim);letter-spacing:.04em}
+.footer-note a{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--dim)}
+
+@media (max-width:1000px){
+  .mission{grid-template-columns:1fr;grid-template-rows:auto;overflow-y:auto}
+  .panel{min-height:280px}
+  .telemetry{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.08s!important}
+  .grid-floor{display:none}
+}
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="grid-floor"></div>
+<div class="ember-glow"></div>
+
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <b>FEASTMODE</b>
+      <small>v0.1 // craving-execution engine</small>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill" id="connPill"><i></i><span>MCP: SWIGGY // FOOD</span></div>
+    <div class="mode-toggle" id="modeToggle">
+      <button class="active" data-mode="demo">DEMO</button>
+      <button class="live" data-mode="live">LIVE</button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <!-- IDLE / BRIEFING -->
+    <section class="briefing" id="briefing">
+      <span class="eyebrow">autonomous // no menus // no scrolling</span>
+      <h1 class="wordmark" data-glitch="FEASTMODE">FEASTMODE</h1>
+      <p class="tagline">Don't order food. <b>Deploy an agent that does.</b> Describe a craving, set a budget, and watch it raid kitchens, crack deals, and build the optimal cart in real time on <b>Swiggy MCP</b>.</p>
+
+      <div class="console-in">
+        <div class="cmd">
+          <span class="caret">&gt;_</span>
+          <input id="craving" autocomplete="off" placeholder="cheap late-night biryani for 4, extra spicy..." />
+          <button class="engage" id="engage">ENGAGE</button>
+        </div>
+        <div class="row" id="chips">
+          <span class="chip" data-q="3am cravings, something greasy and cheap">3AM munchies</span>
+          <span class="chip" data-q="healthy protein bowl under budget, no oil">gym-safe fuel</span>
+          <span class="chip" data-q="feed 6 hungry friends, max deals">squad feast</span>
+          <span class="chip" data-q="dessert only, chocolate everything">sugar rush</span>
+          <span class="chip" data-q="rainy day comfort food, hot and saucy">rainy comfort</span>
+        </div>
+        <div class="budget">
+          <span>BUDGET CAP</span>
+          <input type="range" id="budget" min="150" max="2500" step="50" value="800" />
+          <b id="budgetVal">Rs 800</b>
+        </div>
+      </div>
+    </section>
+
+    <!-- MISSION HUD -->
+    <section class="mission" id="mission">
+      <div class="panel machine">
+        <h3><span class="tick"></span> Agent feed</h3>
+        <div id="feed"></div>
+        <div class="chips-tools" id="tools">
+          <span class="tchip" data-tool="search"><i></i>search_restaurants</span>
+          <span class="tchip" data-tool="menu"><i></i>search_menu</span>
+          <span class="tchip" data-tool="deals"><i></i>crack_deals</span>
+          <span class="tchip" data-tool="cart"><i></i>update_food_cart</span>
+          <span class="tchip" data-tool="order"><i></i>place_food_order</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3><span class="tick"></span> Deal radar</h3>
+        <div class="radar-wrap">
+          <canvas id="radar" width="440" height="440"></canvas>
+          <span class="radar-cap" id="radarCap">standby</span>
+        </div>
+        <div class="deals-strip" id="deals"></div>
+      </div>
+
+      <div class="panel gold">
+        <h3><span class="tick"></span> The haul</h3>
+        <div id="cart"></div>
+        <div class="haul-foot">
+          <div class="meter save"><span class="lbl">Loot saved</span><span class="val" id="saveVal">Rs 0</span></div>
+          <div class="meter total"><span class="lbl">Cart total</span><span class="val" id="totalVal">Rs 0</span></div>
+          <div class="budget-gauge"><i id="gauge"></i></div>
+          <button class="execute" id="execute">EXECUTE ORDER // COD</button>
+        </div>
+      </div>
+
+      <div class="telemetry">
+        <div class="stat fire"><span class="k">Kitchens scanned</span><span class="v" id="stKitchens">0</span></div>
+        <div class="stat gold"><span class="k">Exploits found</span><span class="v" id="stDeals">0</span></div>
+        <div class="stat machine"><span class="k">Tool calls</span><span class="v" id="stCalls">0</span></div>
+        <div class="stat"><span class="k">Mission time</span><span class="v"><span id="stTime">0.0</span><small>s</small></span></div>
+      </div>
+
+      <div class="stamp" id="stamp">
+        <div class="card">
+          <div class="big" id="stampBig">MISSION COMPLETE</div>
+          <div class="sub" id="stampSub">cart locked // ready to execute</div>
+          <button class="again" id="again">RUN ANOTHER HEIST</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="footer-note">built on <a href="https://mcp.swiggy.com/builders" target="_blank" rel="noopener">Swiggy MCP</a> // not affiliated with Swiggy</div>
+
+<script>
+/* ===================== data pools ===================== */
+const KITCHENS = ["NEON TANDOOR","BYTE BIRYANI","404 NOODLE HOUSE","ROGUE RAMEN","QUANTUM QUESADILLA","GHOST KITCHEN 9","MIDNIGHT MASALA","PIXEL PIZZA CO","TURBO TIKKA","GLITCH GELATO","SUDO SUSHI","THE HANGRY DAEMON","OVERCLOCK'D CURRY","BASS DROP BURGERS"];
+const DEALS = [
+  {tag:"MIDNIGHT HEIST",name:"60% off entire menu",save:340,gold:true},
+  {tag:"GHOST DROP",name:"Rs 1 biryani // first 10 orders",save:220,gold:true},
+  {tag:"COMBO EXPLOIT",name:"main + drink + fries @ Rs 199",save:160},
+  {tag:"BOGO",name:"buy 1 get 2 // butter chicken",save:260},
+  {tag:"COUPON STACK",name:"agent stacked 3 codes = 45% off",save:190,gold:true},
+  {tag:"FREE DELIVERY",name:"negotiated // Rs 0 delivery",save:49},
+  {tag:"FLASH",name:"3AM craving window // 50% off",save:210},
+  {tag:"LOYALTY CRACK",name:"hidden gold-tier price unlocked",save:120}
+];
+const DISHES = {
+  biryani:[["Smoked Mutton Biryani","🍛",329,540],["Paneer Tikka Biryani","🍛",249,410]],
+  pizza:[["Molten Truffle Pizza","🍕",299,520],["404 Pepperoni","🍕",279,460]],
+  burger:[["Double Bass Smash Burger","🍔",219,380],["Ghost Chilli Burger","🍔",199,340]],
+  noodles:[["Wok-Hei Hakka Noodles","🍜",189,320],["Rogue Ramen Tonkotsu","🍜",259,430]],
+  dessert:[["Glitch Gelato x3","🍨",179,300],["Molten Choc Lava","🍫",149,260]],
+  healthy:[["Grilled Protein Bowl","🥗",229,360],["Quinoa Power Wrap","🌯",199,320]],
+  generic:[["Chef's Secret Thali","🍽️",249,420],["House Wings x8","🍗",219,370],["Loaded Nachos","🧀",189,310],["Butter Garlic Naan x4","🫓",99,160]]
+};
+function pickDishes(q){
+  q=(q||"").toLowerCase();const out=[];
+  const map=[["biryani",/biry|rice/],["pizza",/pizza/],["burger",/burger|greasy|smash/],["noodles",/noodle|ramen|hakka|chinese/],["dessert",/dessert|sweet|choc|gelato|sugar|ice/],["healthy",/health|protein|gym|salad|bowl|no oil/]];
+  for(const [k,re] of map) if(re.test(q)) out.push(...DISHES[k]);
+  while(out.length<3){const g=DISHES.generic[Math.floor(Math.random()*DISHES.generic.length)];if(!out.includes(g))out.push(g);}
+  return out.slice(0,Math.min(5,2+Math.floor(Math.random()*3)));
+}
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const shuffle=a=>a.map(v=>[Math.random(),v]).sort((x,y)=>x[0]-y[0]).map(v=>v[1]);
+
+/* ===================== element refs ===================== */
+const $=s=>document.querySelector(s);
+const briefing=$("#briefing"),mission=$("#mission"),feed=$("#feed"),dealsBox=$("#deals"),cartBox=$("#cart"),radarCap=$("#radarCap");
+let MODE="demo",budget=800,busy=false,timer=null,t0=0;
+let count={kitchens:0,deals:0,calls:0},total=0,saved=0;
+
+/* ===================== budget + chips + mode ===================== */
+$("#budget").addEventListener("input",e=>{budget=+e.target.value;$("#budgetVal").textContent="Rs "+budget;});
+$("#chips").addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){$("#craving").value=c.dataset.q;$("#craving").focus();}});
+$("#modeToggle").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b||busy)return;
+  MODE=b.dataset.mode;[...$("#modeToggle").children].forEach(x=>x.classList.toggle("active",x===b));
+  $("#connPill").querySelector("span").textContent=MODE==="live"?"MCP: LIVE // needs login":"MCP: SWIGGY // FOOD (sim)";
+});
+$("#craving").addEventListener("keydown",e=>{if(e.key==="Enter")launch();});
+$("#engage").addEventListener("click",launch);
+$("#again").addEventListener("click",reset);
+$("#execute").addEventListener("click",()=>{burst();toast(MODE==="live"?"LIVE order would place now (COD). Wire place_food_order to confirm.":"DEMO order locked. Flip to LIVE + login to actually order.");});
+
+/* ===================== feed + tools helpers ===================== */
+function log(msg,cls=""){
+  const now=((performance.now()-t0)/1000).toFixed(1).padStart(4," ");
+  const el=document.createElement("div");el.className="log "+cls;
+  el.innerHTML=`<span class="t">[${now}]</span><span class="m">${msg}</span>`;
+  feed.appendChild(el);feed.scrollTop=feed.scrollHeight;
+}
+function tool(name,state){const c=$(`.tchip[data-tool="${name}"]`);if(c)c.className="tchip "+state;}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function setStat(){$("#stKitchens").textContent=count.kitchens;$("#stDeals").textContent=count.deals;$("#stCalls").textContent=count.calls;}
+
+/* ===================== radar (canvas) ===================== */
+const rc=$("#radar"),rx=rc.getContext("2d");let radarOn=false,sweep=0,blips=[];
+function radarLoop(){
+  const w=rc.width,h=rc.height,cx=w/2,cy=h/2,R=w/2-8;
+  rx.clearRect(0,0,w,h);
+  rx.strokeStyle="rgba(110,168,255,.14)";rx.lineWidth=1;
+  for(let i=1;i<=4;i++){rx.beginPath();rx.arc(cx,cy,R*i/4,0,7);rx.stroke();}
+  rx.beginPath();rx.moveTo(cx-R,cy);rx.lineTo(cx+R,cy);rx.moveTo(cx,cy-R);rx.lineTo(cx,cy+R);rx.stroke();
+  if(radarOn){
+    sweep+=0.045;
+    const g=rx.createConicGradient?rx.createConicGradient(sweep,cx,cy):null;
+    rx.save();rx.beginPath();rx.moveTo(cx,cy);rx.arc(cx,cy,R,sweep-0.5,sweep);rx.closePath();
+    const grad=rx.createRadialGradient(cx,cy,0,cx,cy,R);
+    grad.addColorStop(0,"rgba(255,90,31,.32)");grad.addColorStop(1,"rgba(255,90,31,0)");
+    rx.fillStyle=grad;rx.fill();rx.restore();
+    rx.strokeStyle="rgba(255,90,31,.55)";rx.beginPath();rx.moveTo(cx,cy);rx.lineTo(cx+Math.cos(sweep)*R,cy+Math.sin(sweep)*R);rx.stroke();
+  }
+  for(const b of blips){
+    b.life+=0.02;const a=Math.max(0,1-b.life*0.5);
+    const bx=cx+Math.cos(b.ang)*b.r,by=cy+Math.sin(b.ang)*b.r;
+    rx.beginPath();rx.arc(bx,by,b.locked?4:3,0,7);
+    rx.fillStyle=b.gold?`rgba(255,202,58,${b.locked?1:a})`:`rgba(255,122,60,${b.locked?1:a})`;rx.fill();
+    if(b.locked){rx.beginPath();rx.arc(bx,by,8+Math.sin(b.life*4)*2,0,7);rx.strokeStyle=b.gold?"rgba(255,202,58,.5)":"rgba(255,122,60,.5)";rx.stroke();}
+  }
+  requestAnimationFrame(radarLoop);
+}
+radarLoop();
+function addBlip(gold){blips.push({ang:rnd(0,6.28),r:rnd(40,rc.width/2-30),life:0,locked:false,gold});const b=blips[blips.length-1];setTimeout(()=>b.locked=true,700);}
+
+/* ===================== odometer ===================== */
+function animateVal(el,from,to,fmt){
+  const dur=600,s=performance.now();
+  (function step(t){const k=Math.min(1,(t-s)/dur);const e=1-Math.pow(1-k,3);el.textContent=fmt(Math.round(from+(to-from)*e));if(k<1)requestAnimationFrame(step);})(s);
+}
+
+/* ===================== main mission ===================== */
+async function launch(){
+  if(busy)return;const q=$("#craving").value.trim()||"surprise me, max deals, cheap";
+  busy=true;$("#engage").textContent="RUNNING...";
+  briefing.classList.add("hide");
+  setTimeout(()=>mission.classList.add("on"),260);
+  await sleep(340);
+  t0=performance.now();
+  timer=setInterval(()=>$("#stTime").textContent=((performance.now()-t0)/1000).toFixed(1),100);
+  feed.innerHTML="";dealsBox.innerHTML="";cartBox.innerHTML="";blips=[];radarOn=true;
+  count={kitchens:0,deals:0,calls:0};total=0;saved=0;setStat();
+  ["search","menu","deals","cart","order"].forEach(t=>tool(t,""));
+  $("#execute").classList.remove("ready");$("#stamp").classList.remove("on");
+  $("#saveVal").textContent="Rs 0";$("#totalVal").textContent="Rs 0";$("#gauge").style.width="0%";
+
+  if(MODE==="live"){const ok=await tryLive(q);if(ok){finish();return;}toast("LIVE backend not reachable // running simulation");}
+  await runSim(q);
+  finish();
+}
+
+async function runSim(q){
+  log(`boot FEASTMODE core // target: "<span class="k">${q.slice(0,54)}</span>"`,"fire");
+  await sleep(360);
+  log("acquiring geo + delivery radius 4.0km","sys");await sleep(320);
+
+  // search
+  tool("search","run");count.calls++;setStat();radarCap.textContent="scanning kitchens...";
+  log('call <span class="k">search_restaurants</span>(query, radius=4km)',"");
+  const picks=shuffle(KITCHENS).slice(0,6+Math.floor(Math.random()*4));
+  for(const k of picks){count.kitchens++;setStat();addBlip(false);log(`  ping // ${k}`,"sys");await sleep(rnd(110,240));}
+  tool("search","done");log(`locked <span class="k">${count.kitchens}</span> kitchens in range`,"win");await sleep(300);
+
+  // menu
+  tool("menu","run");count.calls++;setStat();
+  log('call <span class="k">search_menu</span>(top_kitchens) // parsing variants + add-ons',"");
+  await sleep(560);tool("menu","done");log("menus parsed // 214 items indexed","win");await sleep(240);
+
+  // deals
+  tool("deals","run");count.calls++;setStat();radarCap.textContent="cracking deal vault...";
+  log('call <span class="k">crack_deals</span>() // brute-forcing coupon space',"fire");
+  const chosen=shuffle(DEALS).slice(0,4+Math.floor(Math.random()*3));
+  for(const d of chosen){
+    count.deals++;setStat();addBlip(d.gold);
+    const el=document.createElement("div");el.className="deal"+(d.gold?" gold":"");
+    el.innerHTML=`<div class="tag">${d.tag}</div><div class="name">${d.name}</div><div class="save">- Rs ${d.save} cracked</div>`;
+    dealsBox.appendChild(el);dealsBox.scrollLeft=dealsBox.scrollWidth;
+    saved+=d.save;log(`  EXPLOIT // <span style="color:var(--gold)">${d.tag}</span> :: ${d.name}`,"hit");
+    await sleep(rnd(360,620));
+  }
+  tool("deals","done");log(`vault cracked // <span class="k">${count.deals}</span> exploits stacked`,"win");await sleep(280);
+
+  // cart
+  tool("cart","run");count.calls++;setStat();radarCap.textContent="assembling optimal cart...";
+  log(`call <span class="k">update_food_cart</span>() // optimizing under Rs ${budget}`,"");
+  const dishes=pickDishes(q);
+  for(const [name,emoji,price,orig] of dishes){
+    total+=price;
+    const el=document.createElement("div");el.className="item";
+    el.innerHTML=`<span class="emoji">${emoji}</span><div class="info"><b>${name}</b><small>${shuffle(KITCHENS)[0]}</small></div><div class="px"><b>Rs ${price}</b> <s>Rs ${orig}</s></div>`;
+    cartBox.appendChild(el);cartBox.scrollTop=cartBox.scrollHeight;
+    log(`  + ${name} @ Rs ${price}`,"");
+    const from=total-price;animateVal($("#totalVal"),from,total,v=>"Rs "+v);
+    $("#gauge").style.width=Math.min(100,total/budget*100)+"%";
+    await sleep(rnd(340,560));
+  }
+  animateVal($("#saveVal"),0,saved,v=>"Rs "+v);
+  tool("cart","done");
+  log(`cart optimized // total Rs ${total} // saved Rs ${saved}`,"win");await sleep(300);
+
+  tool("order","run");log('staging <span class="k">place_food_order</span>() // payment: COD','fire');await sleep(500);
+  tool("order","done");log("READY // awaiting your EXECUTE","win");
+}
+
+function finish(){
+  radarOn=false;radarCap.textContent="cart locked";
+  clearInterval(timer);busy=false;$("#engage").textContent="ENGAGE";
+  $("#execute").classList.add("ready");
+  $("#stampBig").textContent="CART LOCKED";
+  $("#stampSub").textContent=`Rs ${total} total // Rs ${saved} looted // ${count.deals} exploits`;
+  setTimeout(()=>{$("#stamp").classList.add("on");burst();setTimeout(()=>$("#stamp").classList.remove("on"),2600);},400);
+}
+
+function reset(){
+  mission.classList.remove("on");$("#stamp").classList.remove("on");
+  setTimeout(()=>briefing.classList.remove("hide"),260);
+  $("#craving").focus();
+}
+
+/* ===================== LIVE mode (real Swiggy MCP via backend) ===================== */
+async function tryLive(q){
+  return new Promise(resolve=>{
+    let got=false,es;
+    try{es=new EventSource(`/api/feast?q=${encodeURIComponent(q)}&budget=${budget}`);}catch(e){return resolve(false);}
+    const fail=setTimeout(()=>{if(!got){try{es.close()}catch(e){};resolve(false);}},2500);
+    es.onmessage=ev=>{
+      got=true;clearTimeout(fail);
+      let d;try{d=JSON.parse(ev.data);}catch(e){return;}
+      if(d.type==="log")log(d.msg,d.cls||"");
+      else if(d.type==="tool")tool(d.name,d.state);
+      else if(d.type==="kitchen"){count.kitchens++;setStat();addBlip(false);}
+      else if(d.type==="deal"){count.deals++;setStat();addBlip(d.gold);const el=document.createElement("div");el.className="deal"+(d.gold?" gold":"");el.innerHTML=`<div class="tag">${d.tag||"DEAL"}</div><div class="name">${d.name}</div><div class="save">- Rs ${d.save||0}</div>`;dealsBox.appendChild(el);saved+=d.save||0;}
+      else if(d.type==="item"){total+=d.price;const el=document.createElement("div");el.className="item";el.innerHTML=`<span class="emoji">${d.emoji||"🍽️"}</span><div class="info"><b>${d.name}</b><small>${d.from||"live"}</small></div><div class="px"><b>Rs ${d.price}</b></div>`;cartBox.appendChild(el);animateVal($("#totalVal"),total-d.price,total,v=>"Rs "+v);$("#gauge").style.width=Math.min(100,total/budget*100)+"%";}
+      else if(d.type==="call")count.calls++,setStat();
+      else if(d.type==="done"){animateVal($("#saveVal"),0,saved,v=>"Rs "+v);es.close();resolve(true);}
+      else if(d.type==="fallback"){try{es.close()}catch(e){};resolve(false);}
+      else if(d.type==="error"){log("LIVE // "+d.msg,"fire");}
+    };
+    es.onerror=()=>{if(!got){clearTimeout(fail);try{es.close()}catch(e){};resolve(false);}};
+  });
+}
+
+/* ===================== particle fx ===================== */
+const fx=$("#fx"),fxx=fx.getContext("2d");let parts=[],embers=[];
+function sizeFx(){fx.width=innerWidth;fx.height=innerHeight;}
+sizeFx();addEventListener("resize",sizeFx);
+for(let i=0;i<26;i++)embers.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vy:-rnd(.2,.7),r:rnd(.6,1.8),a:rnd(.1,.5)});
+function burst(){
+  const cx=innerWidth/2,cy=innerHeight/2;
+  for(let i=0;i<90;i++){const ang=rnd(0,6.28),sp=rnd(3,11);parts.push({x:cx,y:cy,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp-2,life:1,c:Math.random()<.5?"255,90,31":"255,202,58",r:rnd(2,4.5)});}
+}
+function fxLoop(){
+  fxx.clearRect(0,0,fx.width,fx.height);
+  for(const e of embers){e.y+=e.vy;if(e.y<-4){e.y=fx.height+4;e.x=Math.random()*fx.width;}fxx.beginPath();fxx.arc(e.x,e.y,e.r,0,7);fxx.fillStyle=`rgba(255,120,60,${e.a})`;fxx.fill();}
+  parts=parts.filter(p=>p.life>0);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;p.vy+=0.22;p.vx*=0.99;p.life-=0.014;fxx.beginPath();fxx.arc(p.x,p.y,p.r,0,7);fxx.fillStyle=`rgba(${p.c},${Math.max(0,p.life)})`;fxx.fill();}
+  requestAnimationFrame(fxLoop);
+}
+if(!matchMedia("(prefers-reduced-motion:reduce)").matches)fxLoop();
+
+/* ===================== toast ===================== */
+let toastT;function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),3800);}
+$("#craving").focus();
+</script>
+</body>
+</html>
