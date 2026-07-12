@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Toy client for Swiggy's official MCP servers (Food / Instamart / Dineout).",
   "scripts": {
+    "ui": "node server.mjs",
     "login": "node src/login.mjs",
     "tools": "node src/list-tools.mjs",
     "order": "node src/order-demo.mjs"

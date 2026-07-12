@@ -7,6 +7,22 @@ list the live tools and run a demo search.
 Free to prototype on `localhost` - no Swiggy approval needed. Only going to
 production / real transactions is gated (India-only, invite-led).
 
+## FEASTMODE (the fun part)
+
+An experimental UI on top of the MCP: describe a craving, set a budget, and
+watch an autonomous "food agent" raid kitchens, crack deals, and build a cart
+in real time. Neon mission-control aesthetic, nothing like Swiggy.
+
+```bash
+npm run ui     # then open http://localhost:3000
+```
+
+- **DEMO mode** runs fully client-side (no login, no keys) so it is instantly
+  playable and shareable. Deploy `public/` to any static host.
+- **LIVE mode** streams a real mission from the Swiggy Food MCP over SSE
+  (`server.mjs` -> `src/agent.mjs`). Needs a session: `npm run login`. It is
+  best-effort and deliberately stops before placing an order.
+
 ## Servers
 
 | Vertical  | Endpoint                      |
