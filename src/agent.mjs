@@ -27,14 +27,14 @@ function names(str, limit = 10) {
   return [...set].slice(0, limit);
 }
 
-export async function runLiveMission({ query, budget, emit }) {
-  const provider = new FileOAuthProvider("food");
+export async function runLiveMission({ server = "food", query, budget, emit }) {
+  const provider = new FileOAuthProvider(server);
   if (!provider.tokens()) {
-    emit({ type: "error", msg: "no session // run: node src/login.mjs food" });
+    emit({ type: "error", msg: `not connected // click CONNECT SWIGGY (${server})` });
     return false;
   }
 
-  const transport = new StreamableHTTPClientTransport(new URL(SERVERS.food), { authProvider: provider });
+  const transport = new StreamableHTTPClientTransport(new URL(SERVERS[server]), { authProvider: provider });
   const client = new Client({ name: "feastmode-agent", version: "0.1.0" }, { capabilities: {} });
 
   try {
@@ -48,7 +48,7 @@ export async function runLiveMission({ query, budget, emit }) {
     return false;
   }
 
-  emit({ type: "log", msg: `LIVE // connected to Swiggy Food MCP`, cls: "win" });
+  emit({ type: "log", msg: `LIVE // connected to Swiggy ${server.toUpperCase()} MCP`, cls: "win" });
 
   const { tools } = await client.listTools();
   emit({ type: "log", msg: `discovered <span class="k">${tools.length}</span> live tools`, cls: "sys" });

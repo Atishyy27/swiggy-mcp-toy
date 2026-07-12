@@ -44,13 +44,14 @@ export function clearSession(server) {
 }
 
 export class FileOAuthProvider {
-  constructor(server) {
+  constructor(server, opts = {}) {
     this.server = server;
     this._data = load(server); // { clientInformation, tokens, codeVerifier }
+    this._redirect = opts.redirectUrl || REDIRECT_URL;
   }
 
   get redirectUrl() {
-    return REDIRECT_URL;
+    return this._redirect;
   }
 
   get clientMetadata() {
