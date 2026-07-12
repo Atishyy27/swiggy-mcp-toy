@@ -311,6 +311,7 @@ body{
       <b>FEASTMODE</b>
       <small>v0.1 // craving-execution engine</small>
     </div>
+    <button class="ghost-btn" id="homeBtn" style="display:none">&#9664; HOME</button>
     <div class="spacer"></div>
     <div class="vert-switch" id="vertSwitch">
       <button class="active" data-server="food">FOOD</button>
@@ -419,7 +420,7 @@ body{
 </div>
 
 <div class="toast" id="toast"></div>
-<div class="footer-note">built on <a href="https://mcp.swiggy.com/builders" target="_blank" rel="noopener">Swiggy MCP</a> // not affiliated with Swiggy</div>
+<div class="footer-note" id="footerNote">built on <a href="https://mcp.swiggy.com/builders" target="_blank" rel="noopener">Swiggy MCP</a> // not affiliated with Swiggy</div>
 
 <script>
 /* ===================== data pools ===================== */
@@ -548,7 +549,8 @@ $("#share").addEventListener("click",()=>{
 });
 $("#craving").addEventListener("keydown",e=>{if(e.key==="Enter")launch();});
 $("#engage").addEventListener("click",launch);
-$("#again").addEventListener("click",reset);
+$("#again").addEventListener("click",goHome);
+$("#homeBtn").addEventListener("click",goHome);
 $("#execute").addEventListener("click",()=>{burst();toast(MODE==="live"?"LIVE order would place now (COD). Wire place_food_order to confirm.":"DEMO order locked. Flip to LIVE + login to actually order.");});
 
 /* ===================== feed + tools helpers ===================== */
@@ -559,7 +561,8 @@ function log(msg,cls=""){
   feed.appendChild(el);feed.scrollTop=feed.scrollHeight;
 }
 function tool(name,state){const c=$(`.tchip[data-tool="${name}"]`);if(c)c.className="tchip "+state;}
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let aborted=false,liveES=null;
+const sleep=ms=>new Promise((res,rej)=>setTimeout(()=>aborted?rej(new Error("abort")):res(),ms));
 function setStat(){$("#stKitchens").textContent=count.kitchens;$("#stDeals").textContent=count.deals;$("#stCalls").textContent=count.calls;}
 
 /* ===================== radar (canvas) ===================== */
@@ -601,10 +604,10 @@ function animateVal(el,from,to,fmt){
 async function launch(){
   if(busy)return;const q=$("#craving").value.trim()||"surprise me, max deals, cheap";
   lastQuery=q;$("#stKitchensLbl").textContent=VERTICALS[SERVER].noun+" scanned";
-  busy=true;$("#engage").textContent="RUNNING...";
+  aborted=false;busy=true;$("#engage").textContent="RUNNING...";$("#homeBtn").style.display="";
   briefing.classList.add("hide");
   setTimeout(()=>mission.classList.add("on"),260);
-  await sleep(340);
+  try{ await sleep(340); }catch(e){ return; }
   t0=performance.now();
   timer=setInterval(()=>$("#stTime").textContent=((performance.now()-t0)/1000).toFixed(1),100);
   feed.innerHTML="";dealsBox.innerHTML="";cartBox.innerHTML="";blips=[];radarOn=true;
@@ -613,9 +616,21 @@ async function launch(){
   $("#execute").classList.remove("ready");$("#stamp").classList.remove("on");
   $("#saveVal").textContent="Rs 0";$("#totalVal").textContent="Rs 0";$("#gauge").style.width="0%";
 
-  if(MODE==="live"){const ok=await tryLive(q);if(ok){finish();return;}toast("LIVE backend not reachable // running simulation");}
-  await runSim(q);
-  finish();
+  try{
+    if(MODE==="live"){const ok=await tryLive(q);if(aborted)return;if(ok){finish();return;}toast("LIVE unavailable // running simulation");}
+    await runSim(q);
+    if(aborted)return;
+    finish();
+  }catch(e){ if(!aborted)console.error(e); }
+}
+
+function goHome(){
+  aborted=true;radarOn=false;clearInterval(timer);
+  if(liveES){try{liveES.close()}catch(e){}liveES=null;}
+  busy=false;$("#engage").textContent="ENGAGE";$("#homeBtn").style.display="none";
+  mission.classList.remove("on");$("#stamp").classList.remove("on");
+  setTimeout(()=>briefing.classList.remove("hide"),240);
+  $("#craving").focus();
 }
 
 async function runSim(q){
@@ -625,7 +640,10 @@ async function runSim(q){
   const orderName=SERVER==="dineout"?"confirm_booking":"place_order";
   log(`boot FEASTMODE core // ${V.label} // target: "<span class="k">${q.slice(0,50)}</span>"`,"fire");
   await sleep(360);
-  log("acquiring geo + radius 4.0km","sys");await sleep(320);
+  log('call <span class="k">get_addresses</span>() // resolving delivery point',"");
+  await sleep(300);
+  const loc=shuffle(["Koramangala, Bengaluru","HSR Layout, Bengaluru","Indiranagar, Bengaluru","Vallabh Nagar, Indore"])[0];
+  log(`delivering to <span class="k">[Home]</span> ${loc} // radius 4.0km`,"hit");await sleep(280);
 
   // search
   tool("search","run");count.calls++;setStat();radarCap.textContent=`scanning ${V.noun}...`;
@@ -656,7 +674,18 @@ async function runSim(q){
   // cart / basket / booking
   tool("cart","run");count.calls++;setStat();radarCap.textContent=`assembling optimal ${V.unit}...`;
   log(`call <span class="k">${cartName}</span>() // optimizing under Rs ${budget}`,"");
-  const items=V.pick(q);
+  // fill the cart toward the budget cap (not just 3 items)
+  let items;
+  if(SERVER==="dineout"){items=V.pick(q);}
+  else{
+    const pool=[...V.pick(q)].sort((a,b)=>b[2]-a[2]);let t=0,guard=0;items=[];
+    while(t<budget*0.8&&items.length<8&&guard++<60){
+      const cand=pool[Math.floor(Math.random()*pool.length)];
+      if(t+cand[2]>budget){if(items.length>=2)break;else continue;}
+      items.push(cand);t+=cand[2];
+    }
+    if(!items.length)items.push(pool[pool.length-1]);
+  }
   for(const [name,emoji,price,orig] of items){
     total+=price;
     const el=document.createElement("div");el.className="item";
@@ -685,17 +714,12 @@ function finish(){
   setTimeout(()=>{$("#stamp").classList.add("on");burst();setTimeout(()=>$("#stamp").classList.remove("on"),2600);},400);
 }
 
-function reset(){
-  mission.classList.remove("on");$("#stamp").classList.remove("on");
-  setTimeout(()=>briefing.classList.remove("hide"),260);
-  $("#craving").focus();
-}
-
 /* ===================== LIVE mode (real Swiggy MCP via backend) ===================== */
 async function tryLive(q){
   return new Promise(resolve=>{
     let got=false,es;
     try{es=new EventSource(`/api/feast?server=${SERVER}&q=${encodeURIComponent(q)}&budget=${budget}`);}catch(e){return resolve(false);}
+    liveES=es;
     const fail=setTimeout(()=>{if(!got){try{es.close()}catch(e){};resolve(false);}},2500);
     es.onmessage=ev=>{
       got=true;clearTimeout(fail);
@@ -735,8 +759,17 @@ if(!matchMedia("(prefers-reduced-motion:reduce)").matches)fxLoop();
 /* ===================== toast ===================== */
 let toastT;function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),3800);}
 $("#craving").focus();
-refreshConn();
-addEventListener("keydown",e=>{if(e.key==="Escape"){modal.classList.remove("on");if(!busy&&mission.classList.contains("on"))reset();}});
+/* detect whether the LIVE backend is present (vs a static demo deploy) */
+let hasBackend=true;
+(async()=>{
+  try{const r=await fetch("/api/health");hasBackend=r.ok;}catch(e){hasBackend=false;}
+  if(hasBackend){refreshConn();}
+  else{
+    setConn("","DEMO DEPLOY");connBtn.title="LIVE runs locally: clone the repo + npm run ui";
+    $("#footerNote").innerHTML='demo deploy // <a href="https://github.com/Atishyy27/swiggy-mcp-toy" target="_blank" rel="noopener">clone for LIVE</a> // built on Swiggy MCP';
+  }
+})();
+addEventListener("keydown",e=>{if(e.key==="Escape"){if(modal.classList.contains("on"))modal.classList.remove("on");else if(mission.classList.contains("on"))goHome();}});
 </script>
 </body>
 </html>
