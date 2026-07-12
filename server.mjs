@@ -13,7 +13,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { FileOAuthProvider, SERVERS, clearSession } from "./src/oauth-provider.mjs";
-import { runLiveMission } from "./src/agent.mjs";
+import { runLiveMission, listAddresses, stageOrder, placeOrder, cancelOrder } from "./src/agent.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dir, "public");
@@ -36,6 +36,13 @@ const json = (res, code, obj) => {
   res.writeHead(code, { "content-type": "application/json" });
   res.end(JSON.stringify(obj));
 };
+
+const readBody = (req) =>
+  new Promise((resolve) => {
+    let b = "";
+    req.on("data", (c) => (b += c));
+    req.on("end", () => { try { resolve(JSON.parse(b || "{}")); } catch { resolve({}); } });
+  });
 
 function newClient(server, redirectUrl) {
   const provider = new FileOAuthProvider(server, redirectUrl ? { redirectUrl } : {});
@@ -154,6 +161,50 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // ---- saved delivery addresses (for the picker) ----
+    if (path === "/api/addresses") {
+      const server = url.searchParams.get("server") || "food";
+      const provider = new FileOAuthProvider(server);
+      if (!provider.tokens()) return json(res, 401, { error: "not connected" });
+      try {
+        return json(res, 200, { addresses: await listAddresses({ server }) });
+      } catch (e) {
+        return json(res, 500, { error: e?.message || String(e) });
+      }
+    }
+
+    // ---- order: stage (adds to REAL cart, returns the REAL bill) ----
+    if (path === "/api/order/stage" && req.method === "POST") {
+      const b = await readBody(req);
+      console.log(`  [${stamp()}] STAGE ${b.server}/${b.restaurantId} ${(b.items || []).length} items`);
+      try {
+        return json(res, 200, { ok: true, ...(await stageOrder(b)) });
+      } catch (e) {
+        return json(res, 500, { error: e?.message || String(e) });
+      }
+    }
+
+    // ---- order: place (REAL order, COD) ----
+    if (path === "/api/order/place" && req.method === "POST") {
+      const b = await readBody(req);
+      console.log(`  [${stamp()}] PLACE ORDER ${b.server} addr=${b.addressId}`);
+      try {
+        return json(res, 200, { ok: true, ...(await placeOrder(b)) });
+      } catch (e) {
+        return json(res, 500, { error: e?.message || String(e) });
+      }
+    }
+
+    // ---- order: cancel (flush the staged cart) ----
+    if (path === "/api/order/cancel" && req.method === "POST") {
+      const b = await readBody(req);
+      try {
+        return json(res, 200, { ok: true, ...(await cancelOrder(b)) });
+      } catch (e) {
+        return json(res, 500, { error: e?.message || String(e) });
+      }
+    }
+
     // ---- LIVE mission (SSE) ----
     if (path === "/api/feast") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -161,9 +212,11 @@ const server = http.createServer(async (req, res) => {
       const server = url.searchParams.get("server") || "food";
       const query = url.searchParams.get("q") || "surprise me";
       const budget = +(url.searchParams.get("budget") || 800);
+      const addressId = url.searchParams.get("addressId") || undefined;
+      const veg = +(url.searchParams.get("veg") || 0);
       try {
         emit({ type: "log", msg: `opening LIVE channel // Swiggy ${server.toUpperCase()} MCP...`, cls: "sys" });
-        const ok = await runLiveMission({ server, query, budget, emit });
+        const ok = await runLiveMission({ server, query, budget, addressId, veg, emit });
         if (!ok) emit({ type: "fallback" });
       } catch (e) {
         emit({ type: "error", msg: e?.message || String(e) });
