@@ -55,16 +55,26 @@ delivery location. Payments are not COD-only: there is a full UPI flow
 
 `server.mjs` (SSE) -> `src/agent.mjs`:
 
-1. `get_addresses` - resolves your real saved delivery address.
-2. `search_restaurants(addressId, query)` - real restaurants near you.
-3. picks the best-rated spot, `get_restaurant_menu` - real dishes + prices.
+1. `get_addresses` - your real saved addresses (pick one in the UI).
+2. `search_restaurants(addressId, query)` - real restaurants near you
+   (veg-only via the VEG toggle).
+3. best-rated spot, `get_restaurant_menu` (2 pages) - real dishes + prices.
 4. `fetch_food_coupons` - real offers.
-5. fills a cart toward your budget cap, preferring bestsellers and dishes that
-   match your craving.
+5. generates several **formations** (budget-fitting combos): CRAVING MATCH,
+   BIG MAINS, MAX VARIETY, and more. You pick one.
 
-It is **read-only**: it never calls `update_food_cart` or `place_food_order`, so
-nothing is ever ordered by accident. Instamart follows the same shape with
-`search_products` / `update_cart`.
+### Ordering (2-step, explicit)
+
+Discovery never orders anything. When you pick a formation and hit EXECUTE:
+
+1. **Stage** - `update_food_cart` adds the combo to your real cart, then
+   `get_food_cart` returns the real bill (items + delivery + taxes). Shown in a
+   confirm dialog.
+2. **Place** - only if you click PLACE REAL ORDER: `place_food_order`
+   (payment `Cash` / COD). CANCEL runs `flush_food_cart` so nothing lingers.
+
+So a real order needs two deliberate clicks and shows the real bill first.
+Instamart generates baskets but ordering is not wired yet.
 
 ## Architecture
 
