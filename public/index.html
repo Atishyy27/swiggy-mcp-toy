@@ -78,6 +78,44 @@ body{
 .mode-toggle button.active{background:var(--fire);color:#160a05;font-weight:700}
 .mode-toggle button.live.active{background:var(--machine);color:#06121f}
 
+.vert-switch{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-family:var(--mono);font-size:10.5px}
+.vert-switch button{background:transparent;color:var(--dim);border:0;padding:6px 11px;cursor:pointer;letter-spacing:.08em}
+.vert-switch button.active{background:var(--panel-2);color:var(--ink)}
+.conn-btn,.ghost-btn{font-family:var(--mono);font-size:11px;letter-spacing:.06em;cursor:pointer;border-radius:999px;
+  display:flex;align-items:center;gap:7px;padding:6px 13px;transition:.18s}
+.conn-btn{border:1px solid var(--line);background:var(--panel-2);color:var(--muted)}
+.conn-btn i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.conn-btn:hover{border-color:var(--fire);color:var(--ink)}
+.conn-btn.on{border-color:rgba(87,227,155,.5);color:var(--good)}
+.conn-btn.on i{background:var(--good);box-shadow:0 0 9px var(--good)}
+.conn-btn.pending i{background:var(--gold);box-shadow:0 0 9px var(--gold);animation:beat .8s infinite}
+.ghost-btn{border:1px solid var(--line);background:transparent;color:var(--muted)}
+.ghost-btn:hover{border-color:var(--machine);color:var(--machine-2)}
+
+/* modal */
+.modal{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(5,3,8,.72);backdrop-filter:blur(4px);
+  opacity:0;pointer-events:none;transition:.25s;padding:20px}
+.modal.on{opacity:1;pointer-events:auto}
+.modal-card{width:min(720px,94vw);max-height:82vh;display:flex;flex-direction:column;background:var(--panel);
+  border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.6);transform:translateY(12px);transition:.3s}
+.modal.on .modal-card{transform:none}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid var(--line)}
+.modal-head h3{margin:0;font-family:var(--mono);font-size:13px;letter-spacing:.16em;color:var(--ink)}
+.modal-head h3 span{color:var(--fire)}
+.modal-head button{background:transparent;border:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:11px;
+  padding:6px 12px;border-radius:8px;cursor:pointer}
+.modal-head button:hover{border-color:var(--fire);color:var(--fire-2)}
+.modal-body{overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:11px}
+.tool-card{border:1px solid var(--line);border-left:3px solid var(--machine);border-radius:11px;padding:13px 15px;background:var(--panel-2)}
+.tool-card .tn{font-family:var(--mono);font-weight:700;color:var(--machine-2);font-size:13.5px}
+.tool-card .td{color:var(--muted);font-size:12.5px;margin:5px 0 0;line-height:1.5}
+.tool-card .tp{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.tool-card .arg{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+.tool-card .arg b{color:var(--ink);font-weight:400}
+.tool-card .arg.req b{color:var(--fire-2)}
+.modal-empty{text-align:center;color:var(--muted);font-family:var(--mono);font-size:13px;padding:40px 10px;line-height:1.7}
+.modal-empty b{color:var(--ink)}
+
 /* ---------- idle / briefing ---------- */
 .stage{flex:1;position:relative;overflow:hidden}
 .briefing{
@@ -274,7 +312,13 @@ body{
       <small>v0.1 // craving-execution engine</small>
     </div>
     <div class="spacer"></div>
-    <div class="pill" id="connPill"><i></i><span>MCP: SWIGGY // FOOD</span></div>
+    <div class="vert-switch" id="vertSwitch">
+      <button class="active" data-server="food">FOOD</button>
+      <button data-server="instamart">INSTAMART</button>
+      <button data-server="dineout">DINEOUT</button>
+    </div>
+    <button class="conn-btn" id="connBtn"><i></i><span>CONNECT SWIGGY</span></button>
+    <button class="ghost-btn" id="toolsBtn">LIVE TOOLS</button>
     <div class="mode-toggle" id="modeToggle">
       <button class="active" data-mode="demo">DEMO</button>
       <button class="live" data-mode="live">LIVE</button>
@@ -344,7 +388,7 @@ body{
       </div>
 
       <div class="telemetry">
-        <div class="stat fire"><span class="k">Kitchens scanned</span><span class="v" id="stKitchens">0</span></div>
+        <div class="stat fire"><span class="k" id="stKitchensLbl">Kitchens scanned</span><span class="v" id="stKitchens">0</span></div>
         <div class="stat gold"><span class="k">Exploits found</span><span class="v" id="stDeals">0</span></div>
         <div class="stat machine"><span class="k">Tool calls</span><span class="v" id="stCalls">0</span></div>
         <div class="stat"><span class="k">Mission time</span><span class="v"><span id="stTime">0.0</span><small>s</small></span></div>
@@ -354,10 +398,23 @@ body{
         <div class="card">
           <div class="big" id="stampBig">MISSION COMPLETE</div>
           <div class="sub" id="stampSub">cart locked // ready to execute</div>
-          <button class="again" id="again">RUN ANOTHER HEIST</button>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            <button class="again" id="again">RUN ANOTHER HEIST</button>
+            <button class="again" id="share" style="border-color:rgba(255,202,58,.4);color:var(--gold)">SHARE HEIST</button>
+          </div>
         </div>
       </div>
     </section>
+  </div>
+</div>
+
+<div class="modal" id="toolsModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>LIVE MCP TOOLS // <span id="toolsServer">FOOD</span></h3>
+      <button id="toolsClose">CLOSE</button>
+    </div>
+    <div class="modal-body" id="toolsBody"></div>
   </div>
 </div>
 
@@ -393,14 +450,24 @@ function pickDishes(q){
   while(out.length<3){const g=DISHES.generic[Math.floor(Math.random()*DISHES.generic.length)];if(!out.includes(g))out.push(g);}
   return out.slice(0,Math.min(5,2+Math.floor(Math.random()*3)));
 }
+const GROCERY=[["Cold Brew 6-pack","🥤",240,360],["Artisan Sourdough","🍞",120,180],["Farm Eggs x12","🥚",89,130],["70% Dark Choco Slab","🍫",150,220],["Cold Pressed Juice","🧃",99,160],["Instant Ramen x5","🍜",199,280],["Greek Yogurt Tub","🥛",70,110],["Avocado x3","🥑",180,260],["Kettle Chips Party Pack","🥔",149,210]];
+const TABLES=[["Table for 2 // 8:30 PM","🍽️",0,0],["Chef's Table // window","🪟",0,0],["Rooftop Booth // 9 PM","🌃",0,0],["Private Cabin // 4 pax","🛋️",0,0],["Bar Counter // 7 PM","🍸",0,0]];
+const DARKSTORES=["INSTABAY 12","DARK STORE 07","NEON DEPOT","QUANTUM PANTRY","404 GROCERS","MIDNIGHT MART","10-MIN VAULT"];
+const VENUES=["THE NEON TABLE","SKYBAR 9","ROGUE ROOFTOP","GLITCH LOUNGE","EMBER & OAK","QUANTUM QUARTER"];
+const DINE_DEALS=[{tag:"PRIME SLOT",name:"peak-hour table unlocked",save:0,gold:true},{tag:"COVER WAIVED",name:"entry cover Rs 0",save:500},{tag:"WELCOME ROUND",name:"free starters for the table",save:350,gold:true},{tag:"1+1",name:"buy 1 get 1 on cocktails",save:600}];
+const VERTICALS={
+  food:{label:"FOOD",noun:"kitchens",stores:KITCHENS,deals:DEALS,pick:q=>pickDishes(q),unit:"cart"},
+  instamart:{label:"INSTAMART",noun:"dark stores",stores:DARKSTORES,deals:DEALS,pick:()=>shuffle(GROCERY).slice(0,4+Math.floor(Math.random()*3)),unit:"basket"},
+  dineout:{label:"DINEOUT",noun:"venues",stores:VENUES,deals:DINE_DEALS.concat(DEALS.slice(4)),pick:()=>shuffle(TABLES).slice(0,1+Math.floor(Math.random()*2)),unit:"booking"}
+};
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const shuffle=a=>a.map(v=>[Math.random(),v]).sort((x,y)=>x[0]-y[0]).map(v=>v[1]);
 
 /* ===================== element refs ===================== */
 const $=s=>document.querySelector(s);
 const briefing=$("#briefing"),mission=$("#mission"),feed=$("#feed"),dealsBox=$("#deals"),cartBox=$("#cart"),radarCap=$("#radarCap");
-let MODE="demo",budget=800,busy=false,timer=null,t0=0;
-let count={kitchens:0,deals:0,calls:0},total=0,saved=0;
+let MODE="demo",SERVER="food",connected=false,budget=800,busy=false,timer=null,t0=0;
+let count={kitchens:0,deals:0,calls:0},total=0,saved=0,lastQuery="";
 
 /* ===================== budget + chips + mode ===================== */
 $("#budget").addEventListener("input",e=>{budget=+e.target.value;$("#budgetVal").textContent="Rs "+budget;});
@@ -408,7 +475,76 @@ $("#chips").addEventListener("click",e=>{const c=e.target.closest(".chip");if(c)
 $("#modeToggle").addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b||busy)return;
   MODE=b.dataset.mode;[...$("#modeToggle").children].forEach(x=>x.classList.toggle("active",x===b));
-  $("#connPill").querySelector("span").textContent=MODE==="live"?"MCP: LIVE // needs login":"MCP: SWIGGY // FOOD (sim)";
+  if(MODE==="live"&&!connected)toast("LIVE mode // click CONNECT SWIGGY to use the real MCP");
+});
+
+/* vertical switcher */
+$("#vertSwitch").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b||busy)return;
+  SERVER=b.dataset.server;[...$("#vertSwitch").children].forEach(x=>x.classList.toggle("active",x===b));
+  refreshConn();
+});
+
+/* ---- in-app OAuth: connect / disconnect ---- */
+const connBtn=$("#connBtn"),connLbl=connBtn.querySelector("span");
+function setConn(state,label){connBtn.className="conn-btn"+(state?" "+state:"");connLbl.textContent=label;}
+async function refreshConn(){
+  try{
+    const r=await fetch(`/api/auth/status?server=${SERVER}`);const d=await r.json();
+    connected=!!d.connected;
+    setConn(connected?"on":"", connected?`CONNECTED // ${SERVER.toUpperCase()}`:"CONNECT SWIGGY");
+  }catch(e){connected=false;setConn("","CONNECT (start server)");}
+}
+connBtn.addEventListener("click",async()=>{
+  if(connected){await fetch(`/api/auth/logout?server=${SERVER}`);toast(`disconnected ${SERVER}`);return refreshConn();}
+  setConn("pending","OPENING LOGIN...");
+  let d;
+  try{d=await(await fetch(`/api/auth/start?server=${SERVER}`)).json();}
+  catch(e){setConn("","CONNECT (start server)");return toast("run `npm run ui` first, then open http://localhost:3000");}
+  if(d.connected){return refreshConn();}
+  if(!d.url){setConn("","CONNECT SWIGGY");return toast("could not start auth");}
+  const pop=window.open(d.url,"swiggy_login","width=460,height=720");
+  toast("sign in with phone + OTP in the popup...");
+  let done=false;
+  const onMsg=ev=>{if(ev.data&&typeof ev.data.feastmodeAuth!=="undefined"){done=true;window.removeEventListener("message",onMsg);setTimeout(refreshConn,400);}};
+  window.addEventListener("message",onMsg);
+  // fallback: poll status for 2 min in case postMessage is blocked
+  let tries=0;const poll=setInterval(async()=>{
+    tries++;await refreshConn();
+    if(connected||done||tries>80){clearInterval(poll);if(connected)toast(`connected // ${SERVER.toUpperCase()} MCP live`);else if(tries>80)setConn("","CONNECT SWIGGY");}
+  },1500);
+});
+
+/* ---- live tools browser ---- */
+const modal=$("#toolsModal");
+$("#toolsBtn").addEventListener("click",openTools);
+$("#toolsClose").addEventListener("click",()=>modal.classList.remove("on"));
+modal.addEventListener("click",e=>{if(e.target===modal)modal.classList.remove("on");});
+async function openTools(){
+  modal.classList.add("on");$("#toolsServer").textContent=SERVER.toUpperCase();
+  const body=$("#toolsBody");body.innerHTML=`<div class="modal-empty">querying live schemas...</div>`;
+  let d;
+  try{const r=await fetch(`/api/tools?server=${SERVER}`);d=await r.json();
+    if(r.status===401){body.innerHTML=`<div class="modal-empty"><b>Not connected.</b><br>Click <b>CONNECT SWIGGY</b> first, then reopen this to see the real ${SERVER.toUpperCase()} tools with their exact parameters.</div>`;return;}
+    if(d.error){body.innerHTML=`<div class="modal-empty">${d.error}</div>`;return;}
+  }catch(e){body.innerHTML=`<div class="modal-empty"><b>Backend not reachable.</b><br>Run <b>npm run ui</b> and open http://localhost:3000 to browse live tools.</div>`;return;}
+  body.innerHTML=`<div class="modal-empty" style="padding:0 0 4px;font-size:12px">${d.count} live tools on <b>${SERVER.toUpperCase()}</b> // straight from the MCP schema</div>`;
+  for(const t of d.tools){
+    const el=document.createElement("div");el.className="tool-card";
+    const args=(t.params||[]).map(p=>`<span class="arg${p.required?" req":""}"><b>${p.name}</b>:${p.type}${p.required?"*":""}</span>`).join("");
+    el.innerHTML=`<div class="tn">${t.name}()</div>${t.description?`<div class="td">${t.description}</div>`:""}${args?`<div class="tp">${args}</div>`:""}`;
+    body.appendChild(el);
+  }
+}
+
+/* ---- share to X ---- */
+$("#share").addEventListener("click",()=>{
+  const v=VERTICALS[SERVER];
+  const txt=`I gave an AI agent "${(lastQuery||"feed me").slice(0,60)}" and Rs ${budget}.\nIt raided ${count.kitchens} ${v.noun}, cracked ${count.deals} deals, and built a Rs ${total} ${v.unit} saving Rs ${saved} - live on Swiggy MCP.\n\nFEASTMODE // autonomous craving execution`;
+  const url="https://twitter.com/intent/tweet?text="+encodeURIComponent(txt);
+  navigator.clipboard?.writeText(txt).catch(()=>{});
+  window.open(url,"_blank","noopener");
+  toast("tweet drafted + copied to clipboard");
 });
 $("#craving").addEventListener("keydown",e=>{if(e.key==="Enter")launch();});
 $("#engage").addEventListener("click",launch);
@@ -464,6 +600,7 @@ function animateVal(el,from,to,fmt){
 /* ===================== main mission ===================== */
 async function launch(){
   if(busy)return;const q=$("#craving").value.trim()||"surprise me, max deals, cheap";
+  lastQuery=q;$("#stKitchensLbl").textContent=VERTICALS[SERVER].noun+" scanned";
   busy=true;$("#engage").textContent="RUNNING...";
   briefing.classList.add("hide");
   setTimeout(()=>mission.classList.add("on"),260);
@@ -482,55 +619,60 @@ async function launch(){
 }
 
 async function runSim(q){
-  log(`boot FEASTMODE core // target: "<span class="k">${q.slice(0,54)}</span>"`,"fire");
+  const V=VERTICALS[SERVER];
+  const searchName=SERVER==="dineout"?"search_venues":SERVER==="instamart"?"search_products":"search_restaurants";
+  const cartName=SERVER==="dineout"?"create_booking":SERVER==="instamart"?"update_cart":"update_food_cart";
+  const orderName=SERVER==="dineout"?"confirm_booking":"place_order";
+  log(`boot FEASTMODE core // ${V.label} // target: "<span class="k">${q.slice(0,50)}</span>"`,"fire");
   await sleep(360);
-  log("acquiring geo + delivery radius 4.0km","sys");await sleep(320);
+  log("acquiring geo + radius 4.0km","sys");await sleep(320);
 
   // search
-  tool("search","run");count.calls++;setStat();radarCap.textContent="scanning kitchens...";
-  log('call <span class="k">search_restaurants</span>(query, radius=4km)',"");
-  const picks=shuffle(KITCHENS).slice(0,6+Math.floor(Math.random()*4));
+  tool("search","run");count.calls++;setStat();radarCap.textContent=`scanning ${V.noun}...`;
+  log(`call <span class="k">${searchName}</span>(query, radius=4km)`,"");
+  const picks=shuffle(V.stores).slice(0,6+Math.floor(Math.random()*4));
   for(const k of picks){count.kitchens++;setStat();addBlip(false);log(`  ping // ${k}`,"sys");await sleep(rnd(110,240));}
-  tool("search","done");log(`locked <span class="k">${count.kitchens}</span> kitchens in range`,"win");await sleep(300);
+  tool("search","done");log(`locked <span class="k">${count.kitchens}</span> ${V.noun} in range`,"win");await sleep(300);
 
   // menu
   tool("menu","run");count.calls++;setStat();
-  log('call <span class="k">search_menu</span>(top_kitchens) // parsing variants + add-ons',"");
-  await sleep(560);tool("menu","done");log("menus parsed // 214 items indexed","win");await sleep(240);
+  log('call <span class="k">search_menu</span>() // parsing options',"");
+  await sleep(560);tool("menu","done");log(`indexed ${120+Math.floor(Math.random()*160)} items`,"win");await sleep(240);
 
   // deals
   tool("deals","run");count.calls++;setStat();radarCap.textContent="cracking deal vault...";
   log('call <span class="k">crack_deals</span>() // brute-forcing coupon space',"fire");
-  const chosen=shuffle(DEALS).slice(0,4+Math.floor(Math.random()*3));
+  const chosen=shuffle(V.deals).slice(0,4+Math.floor(Math.random()*3));
   for(const d of chosen){
     count.deals++;setStat();addBlip(d.gold);
     const el=document.createElement("div");el.className="deal"+(d.gold?" gold":"");
-    el.innerHTML=`<div class="tag">${d.tag}</div><div class="name">${d.name}</div><div class="save">- Rs ${d.save} cracked</div>`;
+    el.innerHTML=`<div class="tag">${d.tag}</div><div class="name">${d.name}</div><div class="save">${d.save?"- Rs "+d.save+" cracked":"perk unlocked"}</div>`;
     dealsBox.appendChild(el);dealsBox.scrollLeft=dealsBox.scrollWidth;
-    saved+=d.save;log(`  EXPLOIT // <span style="color:var(--gold)">${d.tag}</span> :: ${d.name}`,"hit");
+    saved+=d.save||0;log(`  EXPLOIT // <span style="color:var(--gold)">${d.tag}</span> :: ${d.name}`,"hit");
     await sleep(rnd(360,620));
   }
   tool("deals","done");log(`vault cracked // <span class="k">${count.deals}</span> exploits stacked`,"win");await sleep(280);
 
-  // cart
-  tool("cart","run");count.calls++;setStat();radarCap.textContent="assembling optimal cart...";
-  log(`call <span class="k">update_food_cart</span>() // optimizing under Rs ${budget}`,"");
-  const dishes=pickDishes(q);
-  for(const [name,emoji,price,orig] of dishes){
+  // cart / basket / booking
+  tool("cart","run");count.calls++;setStat();radarCap.textContent=`assembling optimal ${V.unit}...`;
+  log(`call <span class="k">${cartName}</span>() // optimizing under Rs ${budget}`,"");
+  const items=V.pick(q);
+  for(const [name,emoji,price,orig] of items){
     total+=price;
     const el=document.createElement("div");el.className="item";
-    el.innerHTML=`<span class="emoji">${emoji}</span><div class="info"><b>${name}</b><small>${shuffle(KITCHENS)[0]}</small></div><div class="px"><b>Rs ${price}</b> <s>Rs ${orig}</s></div>`;
+    const px=price?`<b>Rs ${price}</b> ${orig?`<s>Rs ${orig}</s>`:""}`:`<b style="color:var(--good)">FREE</b>`;
+    el.innerHTML=`<span class="emoji">${emoji}</span><div class="info"><b>${name}</b><small>${shuffle(V.stores)[0]}</small></div><div class="px">${px}</div>`;
     cartBox.appendChild(el);cartBox.scrollTop=cartBox.scrollHeight;
-    log(`  + ${name} @ Rs ${price}`,"");
-    const from=total-price;animateVal($("#totalVal"),from,total,v=>"Rs "+v);
-    $("#gauge").style.width=Math.min(100,total/budget*100)+"%";
+    log(`  + ${name}${price?" @ Rs "+price:" // free"}`,"");
+    animateVal($("#totalVal"),total-price,total,v=>"Rs "+v);
+    $("#gauge").style.width=Math.min(100,budget?total/budget*100:0)+"%";
     await sleep(rnd(340,560));
   }
   animateVal($("#saveVal"),0,saved,v=>"Rs "+v);
   tool("cart","done");
-  log(`cart optimized // total Rs ${total} // saved Rs ${saved}`,"win");await sleep(300);
+  log(`${V.unit} optimized // total Rs ${total} // saved Rs ${saved}`,"win");await sleep(300);
 
-  tool("order","run");log('staging <span class="k">place_food_order</span>() // payment: COD','fire');await sleep(500);
+  tool("order","run");log(`staging <span class="k">${orderName}</span>() // payment: COD`,"fire");await sleep(500);
   tool("order","done");log("READY // awaiting your EXECUTE","win");
 }
 
@@ -553,7 +695,7 @@ function reset(){
 async function tryLive(q){
   return new Promise(resolve=>{
     let got=false,es;
-    try{es=new EventSource(`/api/feast?q=${encodeURIComponent(q)}&budget=${budget}`);}catch(e){return resolve(false);}
+    try{es=new EventSource(`/api/feast?server=${SERVER}&q=${encodeURIComponent(q)}&budget=${budget}`);}catch(e){return resolve(false);}
     const fail=setTimeout(()=>{if(!got){try{es.close()}catch(e){};resolve(false);}},2500);
     es.onmessage=ev=>{
       got=true;clearTimeout(fail);
@@ -593,6 +735,8 @@ if(!matchMedia("(prefers-reduced-motion:reduce)").matches)fxLoop();
 /* ===================== toast ===================== */
 let toastT;function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),3800);}
 $("#craving").focus();
+refreshConn();
+addEventListener("keydown",e=>{if(e.key==="Escape"){modal.classList.remove("on");if(!busy&&mission.classList.contains("on"))reset();}});
 </script>
 </body>
 </html>
