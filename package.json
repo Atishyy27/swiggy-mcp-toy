@@ -1,0 +1,16 @@
+{
+  "name": "swiggy-mcp-toy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Toy client for Swiggy's official MCP servers (Food / Instamart / Dineout).",
+  "scripts": {
+    "login": "node src/login.mjs",
+    "tools": "node src/list-tools.mjs",
+    "order": "node src/order-demo.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "open": "^10.1.0"
+  }
+}
