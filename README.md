@@ -4,7 +4,7 @@ A tiny Node client for **Swiggy's official MCP servers**. It does the full
 OAuth 2.1 + PKCE handshake (with dynamic client registration), then lets you
 list the live tools and run a demo search.
 
-Free to prototype on `localhost` — no Swiggy approval needed. Only going to
+Free to prototype on `localhost` - no Swiggy approval needed. Only going to
 production / real transactions is gated (India-only, invite-led).
 
 ## Servers
@@ -29,7 +29,7 @@ npm install
 node src/login.mjs food        # or: instamart | dineout
 ```
 
-Opens Swiggy in your browser — sign in with **phone + OTP**. The token is saved
+Opens Swiggy in your browser - sign in with **phone + OTP**. The token is saved
 to `.swiggy/food.json` and reused on later runs. (This is the one step that
 needs a human; it can't be automated.)
 
@@ -55,9 +55,9 @@ order**.
 
 - Payments through MCP are **cash-on-delivery only** at launch; Dineout is
   free bookings only.
-- No refresh handling beyond what the SDK does — when the ~5-day token expires,
+- No refresh handling beyond what the SDK does - when the ~5-day token expires,
   just re-run `login.mjs`.
 - `localhost:8765` must be free (the OAuth callback listener). Change
-  `CALLBACK_PORT` / `REDIRECT_URL` in `src/oauth-provider.mjs` if needed —
+  `CALLBACK_PORT` / `REDIRECT_URL` in `src/oauth-provider.mjs` if needed -
   `localhost` is whitelisted by Swiggy.
 - Delete `.swiggy/` to force a fresh login.

@@ -64,7 +64,7 @@ async function main() {
 
   try {
     await client.connect(transport);
-    console.log(`\n✅ Connected to Swiggy ${server} MCP — session already valid.`);
+    console.log(`\n✅ Connected to Swiggy ${server} MCP - session already valid.`);
     await client.close();
     return;
   } catch (e) {

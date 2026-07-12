@@ -1,5 +1,5 @@
 // Connect to a Swiggy MCP server with a saved session and dump the live
-// tool / resource / prompt catalog — the ground-truth schemas the public
+// tool / resource / prompt catalog - the ground-truth schemas the public
 // docs don't publish. Writes schema.<server>.json next to the scripts.
 //
 // Usage: node src/list-tools.mjs [food|instamart|dineout|all]   (default: food)
@@ -41,7 +41,7 @@ async function dump(server) {
 
   const tools = await client.listTools();
   out.tools = tools.tools;
-  console.log(`\n━━ Swiggy ${server.toUpperCase()} (${url}) — ${tools.tools.length} tools ━━`);
+  console.log(`\n━━ Swiggy ${server.toUpperCase()} (${url}) - ${tools.tools.length} tools ━━`);
   for (const t of tools.tools) {
     const params = Object.keys(t.inputSchema?.properties || {});
     const required = new Set(t.inputSchema?.required || []);

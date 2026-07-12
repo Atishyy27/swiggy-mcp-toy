@@ -41,7 +41,7 @@ const searchTool =
 
 if (!searchTool) {
   console.log("Available tools:", tools.map((t) => t.name).join(", "));
-  console.log("\nCould not auto-detect a search tool — inspect the list above and adjust.");
+  console.log("\nCould not auto-detect a search tool - inspect the list above and adjust.");
   await client.close();
   process.exit(0);
 }
@@ -62,7 +62,7 @@ for (const c of res.content || []) {
 }
 
 console.log(
-  "\n— Stopping here on purpose. This demo does NOT place an order.\n" +
+  "\n- Stopping here on purpose. This demo does NOT place an order.\n" +
     "  Cart/order tools discovered:",
   tools
     .filter((t) => /cart|order|checkout/i.test(t.name))
