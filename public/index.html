@@ -119,7 +119,7 @@ body{
 /* veg toggle + address picker */
 .addr-sel{font-family:var(--mono);font-size:12px;background:var(--panel-2);color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:8px 13px;max-width:240px;cursor:pointer}
 .addr-sel:focus{outline:0;border-color:var(--fire)}
-#vegToggle button[data-veg="1"].active{background:var(--good);color:#04240f}
+#vegToggle button[data-veg="1"].active,#vegToggle button[data-veg="2"].active{background:var(--good);color:#04240f}
 .optrow{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
 
 /* combo chooser */
@@ -138,25 +138,36 @@ body{
 .combo-card .fitbar i{display:block;height:100%;background:linear-gradient(90deg,var(--fire),var(--gold))}
 .combo-card .vg{width:9px;height:9px;border-radius:2px;border:1.5px solid var(--good);display:inline-block;position:relative;top:1px}
 
-/* pay-first formation card */
-.combo-card.under{border-color:rgba(87,227,155,.45)}
-.combo-card.overc{opacity:.62}
-.combo-card .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-.combo-card .pay{font-family:var(--mono);font-weight:700;font-size:21px;color:var(--good);line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap}
-.combo-card.overc .pay{color:var(--muted)}
-.combo-card .paylbl{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--dim);text-align:right;margin-top:3px}
-.combo-card .badges{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:5px}
-.bdg{font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);text-transform:uppercase}
+/* ---- leaderboard: dense, many carts visible at once ---- */
+.combos-box{max-height:58%!important}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:7px;margin-top:2px}
+.row{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--panel-2);cursor:pointer;
+     transition:border-color .15s,transform .15s,opacity .3s;position:relative;overflow:hidden}
+.row:hover{border-color:var(--gold);transform:translateY(-1px)}
+.row.sel{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}
+.row.under{border-color:rgba(87,227,155,.5)}
+.row.overc{opacity:.5}
+.row.pending{border-style:dashed}
+.row.justpriced{animation:flash .7s ease}
+@keyframes flash{0%{background:rgba(255,202,58,.18)}100%{background:var(--panel-2)}}
+.row .r1{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.row .pay{font-family:var(--mono);font-weight:700;font-size:17px;line-height:1;color:var(--good);
+          font-variant-numeric:tabular-nums;white-space:nowrap}
+.row.pending .pay{color:var(--muted)}
+.row.overc .pay{color:var(--muted)}
+.row .rank{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:.1em}
+.row .who{font-size:11.5px;color:#e2d6e8;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .dish{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.45;
+           display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row .r2{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.bdg{font-family:var(--mono);font-size:8.5px;letter-spacing:.08em;padding:1px 5px;border-radius:3px;
+     border:1px solid var(--line);color:var(--dim);text-transform:uppercase;white-space:nowrap}
 .bdg.coup{border-color:var(--gold);color:var(--gold)}
 .bdg.win{border-color:var(--good);color:var(--good)}
+.bdg.est{border-color:var(--line);color:var(--dim)}
 .bdg.hero{border-color:var(--fire);color:var(--fire-2)}
-.math{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:7px;line-height:1.6}
+.math{font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:5px}
 .math .cut{color:var(--gold)}
-.math s{color:var(--dim)}
-.lines{margin-top:7px;display:flex;flex-direction:column;gap:3px}
-.lines .ln{display:flex;gap:7px;align-items:baseline;font-size:12px;color:#e2d6e8}
-.lines .ln .k{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--dim);width:38px;flex:none;text-transform:uppercase}
-.lines .ln .p{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
 .cfilter{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
 .cfilter button{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
 .cfilter button.on{border-color:var(--gold);color:var(--gold)}
@@ -387,14 +398,14 @@ body{
       <div class="console-in">
         <div class="cmd">
           <span class="caret">&gt;_</span>
-          <input id="craving" autocomplete="off" placeholder="cheap late-night biryani for 4, extra spicy..." />
+          <input id="craving" autocomplete="off" placeholder="sandwich + oreo shake&nbsp;&nbsp;(name the parts, we build every cart)" />
           <button class="engage" id="engage">ENGAGE</button>
         </div>
         <div class="row" id="chips">
-          <span class="chip" data-q="3am cravings, something greasy and cheap">3AM munchies</span>
-          <span class="chip" data-q="healthy protein bowl under budget, no oil">gym-safe fuel</span>
+          <span class="chip" data-q="sandwich + oreo shake">sandwich + shake</span>
+          <span class="chip" data-q="burger + fries + coke">burger + fries + coke</span>
           <span class="chip" data-q="feed 6 hungry friends, max deals">squad feast</span>
-          <span class="chip" data-q="dessert only, chocolate everything">sugar rush</span>
+          <span class="chip" data-q="biryani + gulab jamun">biryani + jamun</span>
           <span class="chip" data-q="rainy day comfort food, hot and saucy">rainy comfort</span>
         </div>
         <div class="budget">
@@ -405,7 +416,8 @@ body{
         <div class="optrow">
           <div class="vert-switch" id="vegToggle">
             <button data-veg="0">ALL</button>
-            <button class="active" data-veg="1">PURE VEG</button>
+            <button class="active" data-veg="1">VEG</button>
+            <button data-veg="2">PURE VEG</button>
           </div>
           <select id="addrSel" class="addr-sel" title="Delivery address (LIVE)">
             <option value="">CONNECT for saved addresses</option>
@@ -568,9 +580,12 @@ $("#vertSwitch").addEventListener("click",e=>{
 });
 
 /* veg toggle + address picker */
+// 0 = anything. 1 = veg dishes, from any kitchen. 2 = only kitchens that serve
+// zero non-veg (no shared grill).
 $("#vegToggle").addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b||busy)return;
   VEG=+b.dataset.veg;[...$("#vegToggle").children].forEach(x=>x.classList.toggle("active",x===b));
+  if(VEG===2)toast("PURE VEG // only 100% veg kitchens, not just veg dishes");
 });
 $("#addrSel").addEventListener("change",e=>{addrId=e.target.value;});
 async function loadAddresses(){
@@ -849,67 +864,74 @@ function showCombos(payload){
   renderCombos();
   radarCap.textContent="pick a formation";
 }
-function renderCombos(){
+const payOf=c=>c.pay!=null?c.pay:(c.estPay!=null?c.estPay:(c.itemTotal||c.total||0));
+
+function renderCombos(flashId){
   const box=$("#combos");box.style.display="";
-  const verified=allCombos.some(c=>c.pay!=null);
-  const under=allCombos.filter(c=>c.under);
+  const done=allCombos.filter(c=>c.pay!=null).length;
+  const under=allCombos.filter(c=>c.under).length;
   const kitchens=new Set(allCombos.map(c=>(c.restaurant||{}).name)).size;
-  const payOf=c=>c.pay!=null?c.pay:(c.itemTotal||c.total||0);
 
   const list=[...allCombos].sort((a,b)=>
-    sortMode==="cheap"?payOf(a)-payOf(b):
     sortMode==="save"?(b.saved||0)-(a.saved||0):
-    ((b.restaurant||{}).rating||0)-((a.restaurant||{}).rating||0));
+    sortMode==="rating"?((b.restaurant||{}).rating||0)-((a.restaurant||{}).rating||0):
+    payOf(a)-payOf(b));
 
-  const hd=verified
-    ? `${under.length} of ${allCombos.length} really cost under Rs ${budget} // ${kitchens} kitchens // every price verified on a real cart`
-    : `${allCombos.length} formations // ${kitchens} kitchens`;
+  const hd=done
+    ? `${under} under Rs ${budget} // ${done}/${allCombos.length} priced for real // ${kitchens} kitchens`
+    : `${allCombos.length} carts // ${kitchens} kitchens // pricing for real...`;
 
   box.innerHTML=`<div class="hd">${hd}</div>
     <div class="cfilter">
       <button data-sort="cheap" class="${sortMode==="cheap"?"on":""}">cheapest to pay</button>
       <button data-sort="save" class="${sortMode==="save"?"on":""}">biggest saving</button>
       <button data-sort="rating" class="${sortMode==="rating"?"on":""}">top rated</button>
-    </div>`;
+    </div>
+    <div class="board"></div>`;
   box.querySelectorAll(".cfilter button").forEach(b=>
     b.addEventListener("click",()=>{sortMode=b.dataset.sort;renderCombos();}));
 
-  list.forEach(c=>{
+  const board=box.querySelector(".board");
+  list.forEach((c,i)=>{
     const r=c.restaurant||{};
+    const real=c.pay!=null;
     const el=document.createElement("div");
-    el.className="combo-card"+(c.pay!=null?(c.under?" under":" overc"):"");
-    if(curCombo===c)el.classList.add("sel");
+    el.className="row"+(c.failed?" overc":real?(c.under?" under":" overc"):" pending")
+      +(curCombo===c?" sel":"")+(flashId&&c.id===flashId?" justpriced":"");
 
-    const allVeg=c.items.every(i=>i.veg);
     const badges=[
-      c.under?`<span class="bdg win">under cap</span>`:(c.pay!=null?`<span class="bdg">over cap</span>`:""),
-      c.coupon?`<span class="bdg coup">${c.coupon} -Rs ${c.saved}</span>`:"",
-      c.hero?`<span class="bdg hero">${c.hero}</span>`:"",
-      allVeg?`<span class="bdg win">veg</span>`:"",
+      real?(c.under?`<span class="bdg win">under cap</span>`:`<span class="bdg">over cap</span>`)
+          :`<span class="bdg est">estimate</span>`,
+      c.coupon?`<span class="bdg coup">${c.coupon} -${c.saved}</span>`:"",
+      c.items.every(i=>i.veg)?`<span class="bdg win">veg</span>`:"",
     ].filter(Boolean).join("");
 
-    const math=c.pay!=null
-      ? `<div class="math">items Rs ${c.itemTotal} + tax Rs ${c.taxes||0}${c.coupon?` <span class="cut">- ${c.coupon} Rs ${c.saved}</span>`:""} = <b>Rs ${c.pay}</b></div>`
-      : `<div class="math">items Rs ${c.itemTotal||c.total}</div>`;
-
     el.innerHTML=`
-      <div class="top">
-        <div style="min-width:0">
-          <div class="badges">${badges}</div>
-          <b style="font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--fire-2)">${c.label}</b>
-        </div>
-        <div>
-          <div class="pay">Rs ${payOf(c)}</div>
-          <div class="paylbl">${c.pay!=null?"YOU PAY":"ITEMS"}</div>
-        </div>
+      <div class="r1">
+        <span class="pay">${c.failed?"n/a":"Rs "+payOf(c)}</span>
+        <span class="rank">#${i+1}${real?"":" ~"}</span>
       </div>
-      <div class="lines">${c.items.map(it=>
-        `<div class="ln"><span class="k">${it.kind||""}</span><span>${it.emoji} ${it.name}</span><span class="p">Rs ${it.price}</span></div>`).join("")}</div>
-      ${math}
-      ${r.name?`<div class="rest">${r.name}${r.rating?` <span class="star">${r.rating}★</span>`:""}${r.eta?` // ${r.eta} min`:""}</div>`:""}`;
+      <div class="who">${r.name||""}${r.rating?` &middot; ${r.rating}★`:""}${r.eta?` &middot; ${r.eta}m`:""}</div>
+      <div class="dish">${c.items.map(it=>`${it.emoji} ${it.name}`).join(" + ")}</div>
+      <div class="r2">${badges}</div>
+      ${real?`<div class="math">items ${c.itemTotal} + tax ${c.taxes||0}${c.coupon?` <span class="cut">- ${c.saved}</span>`:""} = <b>Rs ${c.pay}</b></div>`:""}`;
     el.addEventListener("click",()=>selectCombo(c,el));
-    box.appendChild(el);
+    board.appendChild(el);
   });
+}
+
+// A real price landed for one cart. Fold it in and let the board re-sort itself.
+function applyPriced(d){
+  const c=allCombos.find(x=>x.id===d.id);
+  if(!c)return;
+  if(d.failed){c.failed=true;}
+  else{
+    c.pay=d.pay;c.itemTotal=d.itemTotal;c.taxes=d.taxes;
+    c.coupon=d.coupon;c.saved=d.saved;c.under=d.under;
+    if(d.items&&d.items.length)c.items=d.items;
+    if(d.saved){saved+=d.saved;animateVal($("#saveVal"),saved-d.saved,saved,v=>"Rs "+v);}
+  }
+  renderCombos(d.id);
 }
 function selectCombo(combo,el){
   curCombo=combo;
@@ -1007,7 +1029,8 @@ async function tryLive(q){
       else if(d.type==="kitchen"){count.kitchens++;setStat();addBlip(false);}
       else if(d.type==="deal"){count.deals++;setStat();addBlip(d.gold);const el=document.createElement("div");el.className="deal"+(d.gold?" gold":"");el.innerHTML=`<div class="tag">${d.tag||"DEAL"}</div><div class="name">${d.name}</div><div class="save">- Rs ${d.save||0}</div>`;dealsBox.appendChild(el);saved+=d.save||0;}
       else if(d.type==="item"){total+=d.price;const el=document.createElement("div");el.className="item";el.innerHTML=`<span class="emoji">${d.emoji||"🍽️"}</span><div class="info"><b>${d.name}</b><small>${d.from||"live"}</small></div><div class="px"><b>Rs ${d.price}</b></div>`;cartBox.appendChild(el);animateVal($("#totalVal"),total-d.price,total,v=>"Rs "+v);$("#gauge").style.width=Math.min(100,total/budget*100)+"%";}
-      else if(d.type==="verify"){radarCap.textContent=`pricing real cart ${d.i}/${d.n} // ${d.name}`.slice(0,46);}
+      else if(d.type==="verify"){radarCap.textContent=`pricing ${d.i}/${d.n} // ${d.name}`.slice(0,44);}
+      else if(d.type==="priced"){applyPriced(d);}
       else if(d.type==="call")count.calls++,setStat();
       else if(d.type==="combos"){showCombos(d);}
       else if(d.type==="done"){es.close();resolve(true);}
