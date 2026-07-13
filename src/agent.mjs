@@ -73,9 +73,17 @@ function parseItems(t) {
     if (!m) continue;
     const id = line.match(/\(ID:\s*(\d+)\)/);
     if (!id) continue;
+    const tags = m[3].trim();
     out.push({
       name: m[1].trim(), price: Math.round(parseFloat(m[2])),
-      tags: m[3].trim(), cat, id: id[1],
+      tags, cat, id: id[1],
+      // "has variants" means the dish needs a size chosen (a pizza Small/Medium).
+      // Staging one WITHOUT the variant is the single nastiest behavior on this API:
+      // update_food_cart replies "Cart updated." and echoes an item count back at
+      // you, and the cart is silently EMPTY. Worse, one such item takes the whole
+      // cart down with it, including the items that would have staged fine. So we
+      // have to know about it before we build the cart, not after.
+      hasVariants: /has variants/i.test(tags),
     });
   }
   return out;
@@ -223,7 +231,9 @@ function emojiFor(s = "") {
 // server-side), so at build time we cast a wide net on item total and let the
 // verification pass below throw away whatever does not really land under the cap.
 function buildMeals(items, query, payCap, veg, rest) {
-  let pool = items.filter((i) => i.price > 0);
+  // Variant items cannot be staged without a size, and staging one silently empties
+  // the ENTIRE cart (see parseItems). Never let one into a cart we intend to price.
+  let pool = items.filter((i) => i.price > 0 && !i.hasVariants);
   if (veg) pool = pool.filter((i) => isVeg(i.tags));
   pool = pool.map((i) => ({ ...i, kind: classify(i) })).filter((i) => i.kind !== "condiment");
 
@@ -335,7 +345,9 @@ async function priceMeal(call, addressId, meal) {
 // shake. We take the best few candidates for each component at this kitchen and
 // cross them, so you get the whole space of real combinations, not one guess.
 function buildCarts(items, comps, payCap, veg, rest) {
-  let pool = items.filter((i) => i.price > 0);
+  // Variant items cannot be staged without a size, and staging one silently empties
+  // the ENTIRE cart (see parseItems). Never let one into a cart we intend to price.
+  let pool = items.filter((i) => i.price > 0 && !i.hasVariants);
   if (veg >= VEG_ITEMS) pool = pool.filter((i) => isVeg(i.tags));
   pool = pool.map((i) => ({ ...i, kind: classify(i) })).filter((i) => i.kind !== "condiment");
   if (!pool.length) return [];
@@ -405,13 +417,27 @@ async function huntBestPrice(call, addressId, meal, menuItems, veg, emit, budget
   const rid = String(meal.restaurant.id);
   const inCart = meal.items.map((i) => ({ ...i }));
 
+  // update_food_cart cannot be trusted to tell you what it did. It answers
+  // "Cart updated." and echoes an item count back even when it staged NOTHING.
+  // The only source of truth is re-reading the cart, and if the cart came back
+  // empty after we asked for items, that is a failure and it gets SAID, not
+  // swallowed. A silent skip here is how you lose every pizza on Swiggy and never
+  // find out.
   const stage = async () => {
     await call("update_food_cart", {
       restaurantId: rid, addressId,
       cartItems: inCart.map((i) => ({ menu_item_id: String(i.menu_item_id), quantity: i.quantity || 1 })),
     });
     const t = textOf(await call("get_food_cart", { addressId }));
-    return { text: t, bill: parseBill(t) };
+    const bill = parseBill(t);
+    if (inCart.length && !bill.toPay) {
+      emit({
+        type: "log", cls: "fire",
+        msg: `    ${meal.restaurant.name} // asked for ${inCart.length} item(s), Swiggy staged an EMPTY cart ` +
+          `and still said "Cart updated". Dropping this one.`,
+      });
+    }
+    return { text: t, bill };
   };
 
   // What we bolt on to climb toward a threshold.
@@ -571,7 +597,9 @@ async function priceCart(call, addressId, rid, items) {
 // because it never lets the item total climb far enough to unlock anything.
 // Overshoot the threshold by as little as possible, and keep it a real meal.
 function buildMealClearing(items, query, threshold, veg, rest) {
-  let pool = items.filter((i) => i.price > 0);
+  // Variant items cannot be staged without a size, and staging one silently empties
+  // the ENTIRE cart (see parseItems). Never let one into a cart we intend to price.
+  let pool = items.filter((i) => i.price > 0 && !i.hasVariants);
   if (veg) pool = pool.filter((i) => isVeg(i.tags));
   pool = pool.map((i) => ({ ...i, kind: classify(i) })).filter((i) => i.kind !== "condiment");
 
@@ -648,6 +676,16 @@ export async function stageOrder({ server = "food", addressId, restaurantId, ite
     let cartText = textOf(await call("get_food_cart", { addressId }));
     let bill = parseBill(cartText);
     const basePay = bill.toPay;
+
+    // update_food_cart says "Cart updated." even when it staged nothing (any item
+    // needing a size variant is dropped, and takes the rest of the cart with it).
+    // Fail loudly rather than hand back a confident Rs 0 bill.
+    if (items.length && !basePay) {
+      throw new Error(
+        "Swiggy accepted the cart and then staged nothing. This happens when a dish needs " +
+        "a size chosen (a pizza), which the MCP drops silently. Pick a cart without a sized dish."
+      );
+    }
 
     // Real coupons only exist once a cart exists.
     let offers = [];
