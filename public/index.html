@@ -132,6 +132,18 @@ body{
 .combo-card .cl b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--fire-2)}
 .combo-card .cl .tot{font-family:var(--mono);font-weight:700;color:var(--gold);font-variant-numeric:tabular-nums}
 .combo-card .ci{color:var(--muted);font-size:12px;margin-top:5px;line-height:1.5}
+.combo-card .rest{display:flex;align-items:center;gap:7px;margin-top:6px;font-family:var(--mono);font-size:10.5px;color:var(--machine);letter-spacing:.05em}
+.combo-card .rest .star{color:var(--gold)}
+.combo-card .fitbar{height:3px;border-radius:3px;background:rgba(255,255,255,.07);margin-top:8px;overflow:hidden}
+.combo-card .fitbar i{display:block;height:100%;background:linear-gradient(90deg,var(--fire),var(--gold))}
+.combo-card .vg{width:9px;height:9px;border-radius:2px;border:1.5px solid var(--good);display:inline-block;position:relative;top:1px}
+.cfilter{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.cfilter button{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+.cfilter button.on{border-color:var(--gold);color:var(--gold)}
+.offers{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.offer{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:11.5px;padding:8px 11px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted)}
+.offer.hit{border-color:var(--good);color:var(--good)}
+.offer .cd{font-weight:700;letter-spacing:.08em}
 .bill{font-family:var(--mono);font-size:13px;white-space:pre-wrap;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:14px;line-height:1.6}
 .warn{font-family:var(--mono);font-size:12.5px;color:var(--fire-2);border:1px solid rgba(255,90,31,.35);border-radius:10px;padding:11px 13px;line-height:1.5}
 
@@ -746,7 +758,7 @@ async function runSim(q){
   const combos=demoCombos(q,budget);
   tool("cart","done");tool("order","done");
   log(`built <span class="k">${combos.length}</span> formations // pick one`,"win");
-  showCombos({orderable:false,restaurant:{name:shuffle(V.stores)[0]},combos});
+  showCombos({orderable:false,combos});
 }
 
 function demoPool(){
@@ -763,10 +775,19 @@ function demoCombos(q,budget){
   const rot=(a,n)=>a.slice(n).concat(a.slice(0,n));
   const byC=[...pool].sort((a,b)=>craving(b)-craving(a)||b.price-a.price);
   const byBig=[...pool].sort((a,b)=>b.price-a.price),bySmall=[...pool].sort((a,b)=>a.price-b.price);
-  const raw=[{label:craving(byC[0])?"CRAVING MATCH":"CHEF'S PICK",...fill(byC)},{label:"BIG MAINS",...fill(byBig)},{label:"MAX VARIETY",...fill(bySmall)},{label:"WILDCARD",...fill(rot(byC,2))}];
+  const raw=[];
+  const kitchens=shuffle(V.stores).slice(0,5);
+  const shapes=[["CRAVING MATCH",byC],["BIG MAINS",byBig],["MAX VARIETY",bySmall],["WILDCARD",rot(byC,2)],["STACKED",rot(byBig,1)],["BESTSELLERS",rot(byC,1)]];
+  shapes.forEach(([label,arr],i)=>{
+    const f=fill(arr);
+    if(!f.items.length)return;
+    raw.push({label:label==="CRAVING MATCH"&&!craving(byC[0])?"CHEF'S PICK":label,...f,
+      fit:Math.round(f.total/budget*100),
+      restaurant:{name:kitchens[i%kitchens.length],rating:(38+((i*7)%12))/10,eta:20+((i*9)%35)}});
+  });
   const seen=new Set(),out=[];
-  for(const c of raw){if(!c.items.length)continue;const k=c.items.map(i=>i.name).sort().join(",");if(seen.has(k))continue;seen.add(k);out.push(c);}
-  return out.slice(0,4);
+  for(const c of raw){const k=c.items.map(i=>i.name).sort().join(",");if(seen.has(k))continue;seen.add(k);out.push(c);}
+  return out;
 }
 
 function finish(){
@@ -776,34 +797,58 @@ function finish(){
 }
 
 /* ---- combo chooser ("P&C formations") ---- */
+let allCombos=[],sortMode="fit";
 function showCombos(payload){
-  orderCtx={orderable:!!payload.orderable,restaurant:payload.restaurant||{},addressId:payload.addressId||addrId,addressLabel:payload.addressLabel||""};
+  orderCtx={orderable:!!payload.orderable,addressId:payload.addressId||addrId,addressLabel:payload.addressLabel||""};
   curCombo=null;
+  allCombos=payload.combos||[];
+  renderCombos();
+  radarCap.textContent="pick a formation";
+}
+function renderCombos(){
   const box=$("#combos");box.style.display="";
-  box.innerHTML=`<div class="hd">choose your formation // ${payload.combos.length} options ${orderCtx.orderable?"// tap to order":""}</div>`;
-  payload.combos.forEach((c,i)=>{
+  const kitchens=new Set(allCombos.map(c=>(c.restaurant||{}).name)).size;
+  const list=[...allCombos].sort((a,b)=>
+    sortMode==="fit"?(b.fit||0)-(a.fit||0):
+    sortMode==="cheap"?a.total-b.total:
+    ((b.restaurant||{}).rating||0)-((a.restaurant||{}).rating||0));
+
+  box.innerHTML=`<div class="hd">${list.length} formations // ${kitchens} kitchens // under Rs ${budget}</div>
+    <div class="cfilter">
+      <button data-sort="fit" class="${sortMode==="fit"?"on":""}">best value</button>
+      <button data-sort="cheap" class="${sortMode==="cheap"?"on":""}">cheapest</button>
+      <button data-sort="rating" class="${sortMode==="rating"?"on":""}">top rated</button>
+    </div>`;
+  box.querySelectorAll(".cfilter button").forEach(b=>
+    b.addEventListener("click",()=>{sortMode=b.dataset.sort;renderCombos();}));
+
+  list.forEach(c=>{
+    const r=c.restaurant||{};
     const el=document.createElement("div");el.className="combo-card";
+    if(curCombo&&curCombo===c)el.classList.add("sel");
     el.innerHTML=`<div class="cl"><b>${c.label}</b><span class="tot">Rs ${c.total}</span></div>
-      <div class="ci">${c.items.map(it=>`${it.emoji} ${it.name}`).join(" &middot; ").slice(0,180)}</div>`;
+      <div class="ci">${c.items.map(it=>`${it.emoji} ${it.name}`).join(" &middot; ").slice(0,190)}</div>
+      ${r.name?`<div class="rest">${c.items.every(i=>i.veg)?'<span class="vg"></span>':""} ${r.name}${r.rating?` <span class="star">${r.rating}★</span>`:""}${r.eta?` // ${r.eta} min`:""}</div>`:""}
+      <div class="fitbar"><i style="width:${Math.min(100,c.fit||0)}%"></i></div>`;
     el.addEventListener("click",()=>selectCombo(c,el));
     box.appendChild(el);
   });
-  radarCap.textContent="pick a formation";
 }
 function selectCombo(combo,el){
   curCombo=combo;
   [...$("#combos").querySelectorAll(".combo-card")].forEach(x=>x.classList.toggle("sel",x===el));
   cartBox.innerHTML="";total=0;
+  const rname=(combo.restaurant||{}).name||"combo";
   for(const it of combo.items){
     total+=it.price;
     const d=document.createElement("div");d.className="item";
-    d.innerHTML=`<span class="emoji">${it.emoji}</span><div class="info"><b>${it.name}</b><small>${orderCtx.restaurant.name||"combo"}</small></div><div class="px"><b>Rs ${it.price}</b></div>`;
+    d.innerHTML=`<span class="emoji">${it.emoji}</span><div class="info"><b>${it.name}</b><small>${rname}</small></div><div class="px"><b>Rs ${it.price}</b></div>`;
     cartBox.appendChild(d);
   }
   animateVal($("#totalVal"),0,total,v=>"Rs "+v);
   $("#gauge").style.width=Math.min(100,budget?total/budget*100:0)+"%";
   $("#execute").classList.add("ready");
-  $("#execute").textContent=orderCtx.orderable?"EXECUTE ORDER // COD":"EXECUTE (DEMO)";
+  $("#execute").textContent=orderCtx.orderable?"STAGE CART // HUNT OFFERS":"EXECUTE (DEMO)";
 }
 
 /* ---- the 2-step real order ---- */
@@ -813,18 +858,34 @@ async function onExecute(){
     burst();orderDone("FORMATION LOCKED",`Rs ${total} // ${curCombo.items.length} items // demo`);
     return;
   }
-  toast("staging cart on Swiggy...");
-  $("#execute").textContent="STAGING...";
+  const rest=curCombo.restaurant||{};
+  toast("staging cart // hunting real coupons...");
+  $("#execute").textContent="STAGING + HUNTING OFFERS...";
   let d;
   try{
     d=await(await fetch("/api/order/stage",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({server:SERVER,addressId:orderCtx.addressId,restaurantId:orderCtx.restaurant.id,items:curCombo.items})})).json();
-  }catch(e){$("#execute").textContent="EXECUTE ORDER // COD";return toast("stage failed // backend unreachable");}
-  $("#execute").textContent="EXECUTE ORDER // COD";
+      body:JSON.stringify({server:SERVER,addressId:orderCtx.addressId,restaurantId:rest.id,items:curCombo.items})})).json();
+  }catch(e){$("#execute").textContent="STAGE CART // HUNT OFFERS";return toast("stage failed // backend unreachable");}
+  $("#execute").textContent="STAGE CART // HUNT OFFERS";
   if(d.error||!d.ok){return toast("stage error // "+(d.error||"unknown"));}
-  const bill=(d.cart||d.updated||"").replace(/\n?Cart widget[\s\S]*$/i,"").replace(/⚠️[\s\S]*$/,"").trim();
-  $("#orderBody").innerHTML=`<div class="warn">This places a REAL Swiggy order for real food, payment CASH ON DELIVERY, to [${orderCtx.addressLabel||"your address"}]. Review the real bill below.</div>
-    <div class="bill">${bill||"(cart staged)"}</div>`;
+
+  const bill=(d.cart||"").replace(/\n?Cart widget[\s\S]*$/i,"").replace(/⚠️[\s\S]*$/,"").trim();
+  const a=d.applied;
+  let offers="";
+  if(a){
+    log(`coupon <span class="k">${a.code}</span> applied // saved Rs ${a.saved}`,"win");
+    count.deals++;setStat();addBlip(true);
+    offers=`<div class="offers"><div class="offer hit"><span class="cd">${a.code}</span><span>applied // you save Rs ${a.saved}</span></div></div>`;
+  }else if((d.locked||[]).length){
+    offers=`<div class="offers">${d.locked.slice(0,3).map(o=>
+      `<div class="offer"><span class="cd">${o.code}</span><span>${o.need>0?`add Rs ${o.need} to unlock`:"not eligible on these items"}</span></div>`).join("")}</div>`;
+  }
+  const savedLine=a?`<div class="warn" style="border-color:rgba(87,227,155,.4);color:var(--good)">Real coupon ${a.code} is live on this cart. Rs ${d.basePay} becomes Rs ${d.bill.toPay}.</div>`:"";
+
+  $("#orderBody").innerHTML=`<div class="warn">This places a REAL Swiggy order from <b>${rest.name||"this kitchen"}</b>, payment CASH ON DELIVERY, to [${orderCtx.addressLabel||"your address"}]. This is the real bill.</div>
+    ${savedLine}
+    <div class="bill">${bill||"(cart staged)"}</div>
+    ${offers}`;
   $("#orderModal").classList.add("on");
 }
 function closeOrder(){$("#orderModal").classList.remove("on");}
