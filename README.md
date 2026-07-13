@@ -53,28 +53,55 @@ delivery location. Payments are not COD-only: there is a full UPI flow
 
 ## How LIVE mode works
 
+You type a craving, set a budget cap, pick a saved address. The agent then
+returns **every combination that fits the cap**, across every kitchen it can
+reach, and you pick one.
+
 `server.mjs` (SSE) -> `src/agent.mjs`:
 
 1. `get_addresses` - your real saved addresses (pick one in the UI).
-2. `search_restaurants(addressId, query)` - real restaurants near you
-   (veg-only via the VEG toggle).
-3. best-rated spot, `get_restaurant_menu` (2 pages) - real dishes + prices.
-4. `fetch_food_coupons` - real offers.
-5. generates several **formations** (budget-fitting combos): CRAVING MATCH,
-   BIG MAINS, MAX VARIETY, and more. You pick one.
+2. `search_restaurants` - real restaurants near you (see the gotcha below).
+3. `get_restaurant_menu` for the **top 8 kitchens in parallel**, 2 pages each.
+   A typical hunt scans 300-600 real dishes.
+4. builds every budget-fitting **formation** per kitchen (CRAVING MATCH,
+   BESTSELLERS, BIG MAINS, MAX VARIETY, WILDCARD), dedupes, and ranks by how
+   much of your cap it uses. ~30 formations across ~8 kitchens is normal.
+5. you sort by best value / cheapest / top rated, and pick one.
+
+### Two gotchas we had to reverse-engineer
+
+Both of these are undocumented and both used to silently break the agent:
+
+- **`search_restaurants` only understands cuisines and restaurant names.**
+  Give it a dish or a vague phrase (`veg thali`, `lunch`, `snacks`,
+  `something nice`) and it does not error: it quietly returns *dish* rows with
+  no rating, no ETA, and menu-item ids where restaurant ids should be. That is
+  why a real Bengaluru hunt showed zero restaurants. The agent now maps the
+  craving onto a cuisine (`thali` -> `north indian`) and keeps `restaurant` as a
+  net that always catches, while the original words still rank dishes inside the
+  menus.
+- **Coupons are cart-bound.** `fetch_food_coupons` returns 0 coupons until a
+  cart exists, and the codes it hands back are the display names (`FLAT135`),
+  not the UUIDs in the `code:` field. Eligibility is decided per cart, per item,
+  server-side, so discounts **cannot** be precomputed at browse time.
 
 ### Ordering (2-step, explicit)
 
-Discovery never orders anything. When you pick a formation and hit EXECUTE:
+Discovery never orders anything. When you pick a formation and hit
+STAGE CART // HUNT OFFERS:
 
-1. **Stage** - `update_food_cart` adds the combo to your real cart, then
-   `get_food_cart` returns the real bill (items + delivery + taxes). Shown in a
-   confirm dialog.
+1. **Stage** - `update_food_cart` puts the formation in your real cart. Then,
+   because coupons only exist once a cart does, the agent calls
+   `fetch_food_coupons` and *tries* the plausible ones with `apply_food_coupon`,
+   keeping the first that genuinely lowers TO PAY. `get_food_cart` returns the
+   real bill, which is what the confirm dialog shows. A live example:
+   `Rs 574 -> Rs 436` with a real `FLAT135`. Coupons it could not use are shown
+   as honest "add Rs N to unlock" hints.
 2. **Place** - only if you click PLACE REAL ORDER: `place_food_order`
    (payment `Cash` / COD). CANCEL runs `flush_food_cart` so nothing lingers.
 
-So a real order needs two deliberate clicks and shows the real bill first.
-Instamart generates baskets but ordering is not wired yet.
+So a real order needs two deliberate clicks and shows the real, discounted bill
+first. Instamart generates baskets but ordering is not wired yet.
 
 ## Architecture
 
