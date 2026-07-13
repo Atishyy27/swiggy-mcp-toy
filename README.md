@@ -216,6 +216,11 @@ account. Two things make that safe:
 
 Run the real thing locally if you want to actually order.
 
+Swiggy's dynamic client registration accepts a non-localhost `https` redirect URI
+(`POST /auth/register` returns 201 and echoes it back), so the hosted OAuth flow
+should work. The final say happens at `/authorize`, which we can only exercise by
+deploying, so treat this as "very likely" rather than proven.
+
 ## Honest limits
 
 - **"Spend more, pay less" is real but rare.** It needs the coupon to beat the
