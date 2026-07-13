@@ -168,6 +168,19 @@ body{
 .bdg.hero{border-color:var(--fire);color:var(--fire-2)}
 .math{font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:5px}
 .math .cut{color:var(--gold)}
+/* deal oracle: every claim shows the division that produced it */
+.dcard{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:var(--panel-2);margin-bottom:7px}
+.dcard.hero{border-color:var(--fire);background:linear-gradient(180deg,rgba(255,90,31,.09),transparent)}
+.dcard .dt{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--fire-2);text-transform:uppercase}
+.dcard.hero .dt{color:var(--fire-2)}
+.dcard .dn{font-size:12px;color:#e2d6e8;margin:4px 0 7px;line-height:1.4}
+.vgrid{display:grid;grid-template-columns:auto auto 1fr auto;gap:3px 10px;font-family:var(--mono);font-size:10.5px;align-items:baseline}
+.vgrid .g{color:var(--good);font-weight:700}
+.vgrid .b{color:var(--muted);opacity:.65}
+.vgrid .u{color:var(--dim)}
+.vgrid .pen{color:var(--fire-2)}
+.dsum{font-family:var(--mono);font-size:10px;color:var(--gold);margin-top:7px;padding-top:6px;border-top:1px dashed var(--line)}
+.dsec{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase;margin:14px 0 7px}
 .cfilter{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
 .cfilter button{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
 .cfilter button.on{border-color:var(--gold);color:var(--gold)}
@@ -855,6 +868,84 @@ function finish(){
   else radarCap.textContent="cart locked";
 }
 
+/* ---- Instamart deal oracle ----
+   Food needs a cart to price a coupon. Instamart does not: it publishes mrp and
+   offerPrice for every pack size, so the whole edge is arithmetic. Every claim on
+   screen therefore shows its own division. If the numbers are wrong you can catch
+   us with a calculator, which is the point. */
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function showDeals(d){
+  orderCtx={orderable:false,addressId:d.addressId||addrId,addressLabel:d.addressLabel||""};
+  const box=$("#combos");box.style.display="";
+  const same=(d.packs||[]).filter(p=>p.samePrice);
+  const wrong=(d.packs||[]).filter(p=>!p.samePrice);
+  let h=`<div class="hd">${d.counted} variants scanned // priced per gram, per ml, per piece</div>`;
+
+  // The purest version of the trick: identical rupees, one pack is simply bigger.
+  if(same.length){
+    h+=`<div class="dsec">same price, more product</div>`;
+    for(const p of same.slice(0,4)){
+      const s=p.samePrice;
+      h+=`<div class="dcard hero">
+        <div class="dt">same Rs ${s.price} // +${s.more}% more product</div>
+        <div class="dn">${esc(p.best.product)}</div>
+        <div class="vgrid">
+          <span class="g">BUY</span><span class="g">Rs ${s.big.price}</span>
+          <span class="g">${esc(s.big.size)}</span><span class="u">Rs ${s.big.unitLabel}/${s.big.unit}</span>
+          <span class="b">skip</span><span class="b">Rs ${s.small.price}</span>
+          <span class="b">${esc(s.small.size)}</span><span class="pen">Rs ${s.small.unitLabel}/${s.small.unit}</span>
+        </div>
+        <div class="dsum">${s.big.qty}${s.big.unit} vs ${s.small.qty}${s.small.unit} for the identical Rs ${s.price}</div>
+      </div>`;
+    }
+  }
+
+  if(wrong.length){
+    h+=`<div class="dsec">wrong pack size</div>`;
+    for(const p of wrong.slice(0,6)){
+      h+=`<div class="dcard">
+        <div class="dt">+${p.premium}% per ${p.worst.unit} // Rs ${p.overpay} wasted</div>
+        <div class="dn">${esc(p.best.product)}</div>
+        <div class="vgrid">
+          <span class="g">BUY</span><span class="g">Rs ${p.best.price}</span>
+          <span class="g">${esc(p.best.size)}</span><span class="u">Rs ${p.best.unitLabel}/${p.best.unit}</span>
+          <span class="b">skip</span><span class="b">Rs ${p.worst.price}</span>
+          <span class="b">${esc(p.worst.size)}</span><span class="pen">Rs ${p.worst.unitLabel}/${p.worst.unit}</span>
+        </div>
+        <div class="dsum">Rs ${p.worst.price} / ${p.worst.qty}${p.worst.unit} = Rs ${p.worst.unitLabel} vs Rs ${p.best.unitLabel} // +${p.premium}%</div>
+      </div>`;
+    }
+  }
+
+  for(const c of (d.cheapest||[])){
+    h+=`<div class="dsec">cheapest per ${c.unit}, any brand</div><div class="dcard">`;
+    h+=`<div class="vgrid">`;
+    for(const r of c.ranked.slice(0,6)){
+      const win=r===c.ranked[0];
+      h+=`<span class="${win?"g":"b"}">${win?"BEST":""}</span>
+          <span class="${win?"g":"b"}">Rs ${r.unitLabel}/${c.unit}</span>
+          <span class="${win?"g":"b"}">${esc(r.product.slice(0,38))}</span>
+          <span class="u">Rs ${r.price} / ${esc(r.size)}</span>`;
+    }
+    h+=`</div></div>`;
+  }
+
+  if((d.markdowns||[]).length){
+    h+=`<div class="dsec">biggest markdowns</div><div class="dcard"><div class="vgrid">`;
+    for(const r of d.markdowns.slice(0,6))
+      h+=`<span class="g">-${r.off}%</span><span class="b">Rs ${r.mrp}</span>
+          <span class="g">${esc(r.product.slice(0,38))}</span><span class="u">Rs ${r.price}</span>`;
+    h+=`</div></div>`;
+  }
+
+  if(!same.length&&!wrong.length)
+    h+=`<div class="dcard"><div class="dn">Every pack of this is priced flat per unit. No arbitrage here, which is itself the answer: buy whichever size you want.</div></div>`;
+
+  box.innerHTML=h;
+  radarCap.textContent=`${d.counted} variants priced`;
+}
+
 /* ---- combo chooser ("P&C formations") ---- */
 let allCombos=[],sortMode="cheap";
 function showCombos(payload){
@@ -1033,6 +1124,7 @@ async function tryLive(q){
       else if(d.type==="priced"){applyPriced(d);}
       else if(d.type==="call")count.calls++,setStat();
       else if(d.type==="combos"){showCombos(d);}
+      else if(d.type==="deals"){showDeals(d);}
       else if(d.type==="done"){es.close();resolve(true);}
       else if(d.type==="fallback"){try{es.close()}catch(e){};resolve(false);}
       else if(d.type==="error"){log("LIVE // "+d.msg,"fire");}
