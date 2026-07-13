@@ -11,6 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { FileOAuthProvider, SERVERS } from "./oauth-provider.mjs";
+import { parseData, flattenProducts, packArbitrage, cheapestPerUnit, bestMarkdowns } from "./instamart.mjs";
 
 const textOf = (r) => (r?.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -556,7 +557,8 @@ export async function listAddresses({ server = "food" }) {
 // Stage the picked formation in the REAL cart, then hunt REAL coupons against
 // that REAL cart and keep whichever one actually lowers the bill. Fully
 // reversible via cancelOrder(). Nothing is placed here.
-export async function stageOrder({ server = "food", addressId, restaurantId, items }) {
+export async function stageOrder({ server = "food", addressId, restaurantId, items, merge = true }) {
+  if (server === "instamart") return stageInstamart({ addressId, items, merge });
   return withClient(server, async (c) => {
     const call = (name, args) => c.callTool({ name, arguments: args });
 
@@ -605,7 +607,61 @@ export async function stageOrder({ server = "food", addressId, restaurantId, ite
   });
 }
 
+// Instamart's update_cart REPLACES the whole cart, which means the naive call
+// silently destroys whatever the user already had in there. So we read the cart
+// first and merge into it. This is not a nicety: it is the difference between
+// "add this onto my cart" and "throw away my cart".
+//
+// Out-of-stock lines are dropped on the way through. Swiggy excludes them from
+// checkout anyway, and echoing them back into update_cart just re-poisons the cart.
+async function stageInstamart({ addressId, items, merge }) {
+  return withClient("instamart", async (c) => {
+    const call = (name, args) => c.callTool({ name, arguments: args });
+
+    const before = parseData(textOf(await call("get_cart", {})));
+    const existing = merge
+      ? (before?.items || [])
+          .filter((i) => i.isInStockAndAvailable !== false)
+          .map((i) => ({ spinId: i.spinId, skuId: i.skuId, quantity: i.quantity || 1 }))
+      : [];
+    const dropped = merge ? (before?.items || []).filter((i) => i.isInStockAndAvailable === false) : [];
+
+    const byId = new Map(existing.map((i) => [i.spinId, i]));
+    for (const it of items) {
+      const spinId = String(it.spinId || it.id);
+      const prev = byId.get(spinId);
+      if (prev) prev.quantity += it.quantity || 1;
+      else byId.set(spinId, { spinId, skuId: String(it.skuId || ""), quantity: it.quantity || 1 });
+    }
+    const merged = [...byId.values()];
+
+    await call("update_cart", { selectedAddressId: addressId, items: merged });
+    const after = parseData(textOf(await call("get_cart", {})));
+    const toPay = Math.round(parseFloat(String(after?.cartTotalAmount || "0").replace(/[^\d.]/g, ""))) || 0;
+
+    return {
+      bill: { itemTotal: toPay, delivery: 0, taxes: 0, discount: 0, toPay },
+      basePay: toPay,
+      applied: null,           // Instamart exposes no coupon tool at all
+      locked: [],
+      tried: [],
+      offersFound: 0,
+      merged: merged.length,
+      kept: existing.length,
+      dropped: dropped.map((i) => i.itemName),
+      cart: (after?.items || [])
+        .map((i) => `${i.itemName} x${i.quantity} Rs ${i.discountedFinalPrice ?? i.mrp}`)
+        .join("\n")
+        .slice(0, 1200),
+    };
+  });
+}
+
 export async function placeOrder({ server = "food", addressId, note }) {
+  if (server === "instamart") {
+    return withClient("instamart", async (c) =>
+      textOf(await c.callTool({ name: "checkout", arguments: { addressId, paymentMethod: "CASH" } })));
+  }
   return withClient(server, async (c) => {
     const args = { addressId, paymentMethod: "Cash" };
     if (note) args.noteToRestaurant = note;
@@ -613,7 +669,8 @@ export async function placeOrder({ server = "food", addressId, note }) {
   });
 }
 export async function cancelOrder({ server = "food" }) {
-  return withClient(server, async (c) => ({ result: textOf(await c.callTool({ name: "flush_food_cart", arguments: {} })).slice(0, 400) }));
+  const tool = server === "instamart" ? "clear_cart" : "flush_food_cart";
+  return withClient(server, async (c) => ({ result: textOf(await c.callTool({ name: tool, arguments: {} })).slice(0, 400) }));
 }
 
 // search_restaurants only answers CUISINE or restaurant-name queries. Give it a
@@ -843,22 +900,96 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
   return true;
 }
 
+// Instamart is not a cart-building problem, it is an ARITHMETIC problem.
+//
+// Food hides its discounts behind a cart you have to stage one at a time. Instamart
+// hands you mrp + offerPrice for every pack size, in JSON, for free. So there is no
+// oracle to be careful with here: fan out across every component of the craving in
+// parallel and just divide. The edge is that nobody divides 50 prices by 50 pack
+// weights in their head.
 async function instamart(client, call, addr, query, budget, veg, emit) {
-  emit({ type: "tool", name: "search", state: "run" });
-  emit({ type: "log", msg: `call <span class="k">search_products</span>("${query.slice(0, 22)}")` });
-  let items = parseItems(textOf(await call("search_products", { addressId: addr.id, query })));
-  if (veg) items = items.filter((i) => !isNonVeg(i.tags));
-  for (let i = 0; i < Math.max(5, Math.min(items.length, 12)); i++) { emit({ type: "kitchen" }); await sleep(60); }
-  emit({ type: "tool", name: "search", state: "done" });
-  emit({ type: "tool", name: "deals", state: "done" });
-  emit({ type: "log", msg: `found <span class="k">${items.length}</span> real products`, cls: "win" });
+  const parts = splitCraving(query);
+  const queries = parts.length ? parts : [query];
 
-  emit({ type: "tool", name: "cart", state: "run" });
-  const combos = buildMeals(items, query, budget, veg, { id: "", name: "Instamart", rating: 0, eta: 15 });
-  emit({ type: "tool", name: "cart", state: "done" });
-  if (!combos.length) { emit({ type: "log", msg: "no basket fits the budget", cls: "fire" }); emit({ type: "done" }); return true; }
-  emit({ type: "log", msg: `built <span class="k">${combos.length}</span> baskets`, cls: "win" });
-  emit({ type: "combos", orderable: false, addressId: addr.id, addressLabel: addr.tag || "addr", budget, combos });
+  emit({ type: "tool", name: "search", state: "run" });
+  emit({ type: "log", msg: `call <span class="k">search_products</span> x${queries.length} // no cart needed, so these run in parallel`, cls: "sys" });
+
+  // No shared cart to stomp on, so unlike Food this genuinely parallelises.
+  const results = await Promise.all(
+    queries.map(async (q) => {
+      try {
+        const data = parseData(textOf(await call("search_products", { addressId: addr.id, query: q })));
+        return { q, rows: flattenProducts(data) };
+      } catch (e) {
+        emit({ type: "log", msg: `  "${q}" failed // ${String(e?.message || e).slice(0, 50)}`, cls: "fire" });
+        return { q, rows: [] };
+      }
+    })
+  );
+  emit({ type: "tool", name: "search", state: "done" });
+
+  const all = [];
+  const seen = new Set();
+  for (const { q, rows } of results) {
+    const priced = rows.filter((r) => r.unitPrice != null);
+    const skipped = rows.length - priced.length;
+    emit({
+      type: "log",
+      msg: `  "${q}" <span class="k">${rows.length}</span> variants, <span class="k">${priced.length}</span> sized` +
+        (skipped ? ` <span style="color:var(--dim)">(${skipped} unparseable size, excluded)</span>` : ""),
+      cls: rows.length ? "hit" : "fire",
+    });
+    for (const r of rows) {
+      if (seen.has(r.spinId)) continue;
+      seen.add(r.spinId);
+      all.push(r);
+    }
+    emit({ type: "kitchen", name: q });
+  }
+
+  if (!all.length) {
+    emit({ type: "log", msg: "Instamart returned nothing for that", cls: "fire" });
+    emit({ type: "done" });
+    return true;
+  }
+
+  emit({ type: "tool", name: "deals", state: "run" });
+  const packs = packArbitrage(all);
+  const cheap = cheapestPerUnit(all);
+  const markdowns = bestMarkdowns(all);
+  emit({ type: "tool", name: "deals", state: "done" });
+
+  // The headline: same rupees, more product. There is no trade-off to weigh here,
+  // one of the two packs is simply strictly worse, and it is usually the one on
+  // the shelf at eye level.
+  for (const d of packs.filter((p) => p.samePrice).slice(0, 3)) {
+    emit({
+      type: "log",
+      cls: "win",
+      msg: `SAME PRICE Rs ${d.samePrice.price}: <span class="k">${d.samePrice.big.size}</span> vs ${d.samePrice.small.size}` +
+        ` // +${d.samePrice.more}% more product for the same money`,
+    });
+  }
+  for (const d of packs.filter((p) => !p.samePrice).slice(0, 3)) {
+    emit({
+      type: "log",
+      cls: "hit",
+      msg: `wrong pack: ${d.worst.size} is <span class="k">+${d.premium}%</span> per ${d.worst.unit} vs ${d.best.size}` +
+        ` // Rs ${d.overpay} wasted`,
+    });
+  }
+
+  emit({
+    type: "deals",
+    server: "instamart",
+    addressId: addr.id,
+    addressLabel: addr.tag || "addr",
+    budget,
+    packs: packs.slice(0, 10),
+    cheapest: cheap.slice(0, 2),
+    markdowns,
+    counted: all.length,
+  });
   emit({ type: "done" });
   return true;
 }
