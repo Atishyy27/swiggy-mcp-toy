@@ -101,6 +101,12 @@ function classify(it) {
 const OFFER_CAT = /99 store|mcsaver|saver|starting at|value (deal|meal|combo)|offer|deal of|super saver/i;
 const isOfferItem = (i) => OFFER_CAT.test(i.cat || "");
 
+// Things that technically raise a cart total but that nobody wants to be handed.
+// Padding a cart to a coupon threshold with a 1 litre water bottle is exactly the
+// kind of literal-minded, obviously-stupid move that made this feel like a robot.
+const FILLER = /water|bottle|\d+\s*(l|ltr|litre|liter)\b|packaged drinking|soda water|ice cubes?|plate|spoon|napkin|carry ?bag/i;
+const isFiller = (i) => FILLER.test(i.name || "");
+
 const parseCoupons = (t) => {
   const re = new RegExp("-\\s*([A-Z0-9]+)\\s*\\[([^\\]]*)\\]\\s*" + D + "\\s*(.+?)\\s*\\(code:", "g");
   const out = [];
@@ -134,12 +140,43 @@ const parseBill = (t) => {
 const isNonVeg = (t = "") => /non[-\s]?veg/i.test(t);
 const isVeg = (t = "") => /veg/i.test(t) && !isNonVeg(t);
 
+// veg modes: 0 = anything, 1 = veg dishes from any kitchen, 2 = pure-veg kitchens only.
+const VEG_ALL = 0, VEG_ITEMS = 1, VEG_PURE = 2;
+const isPureVegKitchen = (items) => {
+  const known = items.filter((i) => /veg/i.test(i.tags));
+  return known.length >= 8 && known.every((i) => isVeg(i.tags));
+};
+
+// "sandwich + oreo shake" is not one search term. It is a LIST of things the cart
+// must contain. That is the whole point: you name the parts, we assemble every
+// legal cart from them.
+const splitCraving = (q) =>
+  String(q || "").split(/\s*(?:\+|,|&|\band\b|\bwith\b)\s*/i)
+    .map((s) => s.trim()).filter((s) => s.length > 1).slice(0, 4);
+
+// Items that satisfy one component of the craving.
+function matchComponent(items, comp) {
+  const toks = comp.toLowerCase().split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+  if (!toks.length) return [];
+  const hay = (i) => (i.name + " " + i.cat).toLowerCase();
+  const all = items.filter((i) => toks.every((t) => hay(i).includes(t)));
+  if (all.length) return all;
+  // Nothing matches every word, so fall back to the most distinctive one.
+  const strong = toks.sort((a, b) => b.length - a.length)[0];
+  return items.filter((i) => hay(i).includes(strong));
+}
+
 const STOP = new Set(["something", "nice", "good", "tasty", "some", "food", "want", "give", "get", "the", "and", "for", "with", "please", "order", "under", "cheap", "best", "me", "my"]);
 
 // How many kitchens we stage-and-price for real. Each kitchen costs two probes
 // (a base meal, then a cart built to clear its cheapest coupon threshold) and a
 // probe is 4 to 9 MCP calls. This is the dial between honesty and wall-clock.
 const PROBE_KITCHENS = 5;
+
+// How many of the assembled carts we actually stage and price for real. Every
+// candidate is shown instantly with an estimate; these are the ones that get a
+// verified number. Serial, because Swiggy gives an account exactly one cart.
+const PROBE_CARTS = 10;
 
 // How many times we may top a cart up chasing a coupon threshold before giving
 // up on that kitchen.
@@ -277,6 +314,68 @@ async function priceMeal(call, addressId, meal) {
   return { bill, basePay, applied, offers, cart: cart.split("Cart widget")[0].trim().slice(0, 1200) };
 }
 
+// Assemble every legal cart from the components you named.
+//
+// "sandwich + oreo shake" means the cart must contain a sandwich AND an oreo
+// shake. We take the best few candidates for each component at this kitchen and
+// cross them, so you get the whole space of real combinations, not one guess.
+function buildCarts(items, comps, payCap, veg, rest) {
+  let pool = items.filter((i) => i.price > 0);
+  if (veg >= VEG_ITEMS) pool = pool.filter((i) => isVeg(i.tags));
+  pool = pool.map((i) => ({ ...i, kind: classify(i) })).filter((i) => i.kind !== "condiment");
+  if (!pool.length) return [];
+
+  // Item total we allow ourselves to explore. Tax adds ~18%, a coupon can take a
+  // big bite back off, so the window has to be generous or we never find the
+  // carts that are only cheap AFTER the discount lands.
+  const ceiling = Math.round(payCap * 2.4);
+
+  const lists = [];
+  for (const c of comps) {
+    const m = matchComponent(pool, c).filter((i) => i.price <= ceiling);
+    if (!m.length) return []; // this kitchen cannot serve this craving
+    // A few genuinely different options per component: cheapest, a bestseller,
+    // and a mid one. Cross-product blows up fast, so keep it to 3.
+    const byPrice = [...m].sort((a, b) => a.price - b.price);
+    const star = m.filter((i) => /bestseller/i.test(i.tags)).sort((a, b) => a.price - b.price)[0];
+    const picks = [byPrice[0], star, byPrice[Math.floor(byPrice.length / 2)]]
+      .filter(Boolean)
+      .filter((v, i, a) => a.findIndex((x) => x.id === v.id) === i)
+      .slice(0, 3);
+    lists.push(picks);
+  }
+
+  // Cross the components.
+  let carts = [[]];
+  for (const l of lists) {
+    const next = [];
+    for (const cart of carts) for (const it of l) if (!cart.some((x) => x.id === it.id)) next.push([...cart, it]);
+    carts = next;
+  }
+
+  const out = [], seen = new Set();
+  for (const cart of carts) {
+    const total = cart.reduce((n, i) => n + i.price, 0);
+    if (!total || total > ceiling) continue;
+    const key = cart.map((i) => i.id).sort().join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      label: cart.map((i) => i.kind === "main" ? "MAIN" : i.kind.toUpperCase()).join(" + ").slice(0, 22),
+      hero: "",
+      itemTotal: total,
+      estPay: Math.round(total * 1.18),
+      restaurant: { id: rest.id, name: rest.name, rating: rest.rating, eta: rest.eta },
+      items: cart.map((i) => ({
+        name: i.name, price: i.price, kind: i.kind,
+        emoji: emojiFor(i.name + " " + i.cat), menu_item_id: i.id,
+        quantity: 1, veg: isVeg(i.tags),
+      })),
+    });
+  }
+  return out.sort((a, b) => a.itemTotal - b.itemTotal).slice(0, 8);
+}
+
 // Hunt the cheapest REAL price at one kitchen.
 //
 // This is the manoeuvre Atishay does by hand: a Rs 179 cart with Rs 117 off beats
@@ -312,9 +411,9 @@ async function huntBestPrice(call, addressId, meal, menuItems, veg, emit) {
   //     coupon you raised it for.
   const pad = menuItems
     .filter((i) => i.price > 0)
-    .filter((i) => (veg ? isVeg(i.tags) : true))
+    .filter((i) => (veg >= VEG_ITEMS ? isVeg(i.tags) : true))
     .map((i) => ({ ...i, kind: classify(i) }))
-    .filter((i) => i.kind !== "condiment" && i.price >= 40 && !isOfferItem(i))
+    .filter((i) => i.kind !== "condiment" && i.price >= 40 && !isOfferItem(i) && !isFiller(i))
     .sort((a, b) => a.price - b.price);
 
   try { await call("flush_food_cart", {}); } catch {}
@@ -539,19 +638,30 @@ const CUISINE = [
 ];
 
 async function findRestaurants(call, addrId, query, emit) {
-  const q0 = query.toLowerCase();
-  const words = q0.split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
-  const cuisines = CUISINE.filter(([re]) => re.test(q0)).map(([, c]) => c);
+  // "sandwich + oreo shake" needs kitchens that can serve BOTH, so search for
+  // each component and pool the results, rather than betting on one keyword.
+  const comps = splitCraving(query);
+  const cuisineFor = (s) => CUISINE.filter(([re]) => re.test(s.toLowerCase())).map(([, c]) => c);
 
-  const tries = [query, ...words, ...cuisines, "restaurant"].filter((v, i, a) => v && a.indexOf(v) === i);
-  for (const q of tries) {
-    const rests = parseRestaurants(textOf(await call("search_restaurants", { addressId: addrId, query: q })));
-    if (rests.length) {
-      if (q !== query) emit({ type: "log", msg: `"${query}" is a dish, not a cuisine // re-aimed at <span class="k">${q}</span>`, cls: "fire" });
-      return { rests, used: q };
-    }
+  const tries = [];
+  for (const c of comps) tries.push(...cuisineFor(c), c);
+  tries.push(query, ...cuisineFor(query), "restaurant");
+
+  const byId = new Map();
+  let used = "";
+  for (const q of tries.filter((v, i, a) => v && a.indexOf(v) === i)) {
+    let rests = [];
+    try { rests = parseRestaurants(textOf(await call("search_restaurants", { addressId: addrId, query: q }))); } catch {}
+    if (!rests.length) continue;
+    if (!used) used = q;
+    for (const r of rests) if (!byId.has(r.id)) byId.set(r.id, r);
+    // Enough to work with, and every extra search costs a round trip.
+    if (byId.size >= 14) break;
   }
-  return { rests: [], used: query };
+  if (byId.size && used !== query) {
+    emit({ type: "log", msg: `searched each part separately // Swiggy only understands cuisines, not dishes`, cls: "fire" });
+  }
+  return { rests: [...byId.values()], used: used || query };
 }
 
 export async function runLiveMission({ server = "food", query, budget = 800, addressId, veg = 0, emit }) {
@@ -602,81 +712,100 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
       }
       const byId = new Map(items.map((i) => [i.id, i]));
       items = [...byId.values()];
-      const usable = veg ? items.filter((i) => isVeg(i.tags)) : items;
-      emit({ type: "log", msg: `  ${r.name} <span class="k">${usable.length}</span> ${veg ? "veg " : ""}dishes`, cls: "sys" });
-      return { rest: r, items: usable };
+      const pure = isPureVegKitchen(items);
+      const usable = veg >= VEG_ITEMS ? items.filter((i) => isVeg(i.tags)) : items;
+      return { rest: r, items: usable, pure };
     }));
     emit({ type: "tool", name: "menu", state: "done" });
 
-    const dishes = menus.reduce((n, m) => n + m.items.length, 0);
-    emit({ type: "log", msg: `scanned <span class="k">${dishes}</span> real dishes across <span class="k">${menus.length}</span> kitchens`, cls: "win" });
+    // PURE VEG means the whole kitchen is veg, not just the dish. No shared grill.
+    let kitchens = menus;
+    if (veg === VEG_PURE) {
+      kitchens = menus.filter((m) => m.pure);
+      emit({ type: "log", msg: `PURE VEG // <span class="k">${kitchens.length}</span> of ${menus.length} kitchens serve zero non-veg`, cls: "win" });
+      if (!kitchens.length) {
+        emit({ type: "log", msg: "no pure-veg kitchen nearby for that // try VEG instead", cls: "fire" });
+        emit({ type: "done" }); await client.close(); return true;
+      }
+    }
+    for (const m of kitchens) {
+      emit({ type: "log", msg: `  ${m.rest.name} <span class="k">${m.items.length}</span> dishes${m.pure ? ' <span style="color:var(--good)">pure veg</span>' : ""}`, cls: "sys" });
+    }
+    const dishes = kitchens.reduce((n, m) => n + m.items.length, 0);
+    emit({ type: "log", msg: `scanned <span class="k">${dishes}</span> real dishes across <span class="k">${kitchens.length}</span> kitchens`, cls: "win" });
 
+    // ---- assemble every cart that satisfies the craving ----
     emit({ type: "tool", name: "cart", state: "run" });
-    emit({ type: "log", msg: `building real meals // main + side + drink, no sachets`, cls: "" });
-    let meals = menus.flatMap((m) => buildMeals(m.items, query, budget, veg, m.rest));
+    const comps = splitCraving(query);
+    let carts;
+    if (comps.length) {
+      emit({ type: "log", msg: `craving parsed // cart must contain: <span class="k">${comps.join("</span> + <span class='k'>")}</span>`, cls: "fire" });
+      carts = kitchens.flatMap((m) => buildCarts(m.items, comps, budget, veg, m.rest));
+      if (!carts.length) {
+        emit({ type: "log", msg: `no kitchen serves all of that // falling back to best meals`, cls: "fire" });
+        carts = kitchens.flatMap((m) => buildMeals(m.items, query, budget, veg, m.rest));
+      }
+    } else {
+      carts = kitchens.flatMap((m) => buildMeals(m.items, query, budget, veg, m.rest));
+    }
 
     const seen = new Set();
-    meals = meals.filter((c) => {
+    carts = carts.filter((c) => {
       const k = c.restaurant.id + ":" + c.items.map((i) => i.menu_item_id).sort().join(",");
       if (seen.has(k)) return false;
       seen.add(k); return true;
-    });
+    }).sort((a, b) => (a.estPay || a.itemTotal) - (b.estPay || b.itemTotal));
+    carts.forEach((c, i) => { c.id = "c" + i; if (!c.estPay) c.estPay = Math.round(c.itemTotal * 1.18); });
+
     emit({ type: "tool", name: "cart", state: "done" });
-    if (!meals.length) {
-      emit({ type: "log", msg: `no real meal fits near Rs ${budget} // raise the cap`, cls: "fire" });
+    if (!carts.length) {
+      emit({ type: "log", msg: `nothing assembles near Rs ${budget} // raise the cap`, cls: "fire" });
       emit({ type: "done" }); await client.close(); return true;
     }
-    emit({ type: "log", msg: `built <span class="k">${meals.length}</span> candidate meals across <span class="k">${new Set(meals.map((c) => c.restaurant.id)).size}</span> kitchens`, cls: "win" });
 
-    // ---- the honest part: price them for real ----
-    // A coupon's value cannot be predicted, so we stage each candidate in the
-    // real cart, hunt coupons against it, read the true TO PAY, and flush. Only
-    // what genuinely lands under your pay cap survives.
+    // Show EVERYTHING now, estimated. Then the leaderboard fills in with real
+    // prices as each cart gets staged for real.
+    emit({ type: "log", msg: `built <span class="k">${carts.length}</span> carts across <span class="k">${new Set(carts.map((c) => c.restaurant.id)).size}</span> kitchens // pricing them for real now`, cls: "win" });
+    emit({
+      type: "combos", orderable: true, live: true,
+      addressId: addr.id, addressLabel: addr.tag || "addr", budget,
+      combos: carts,
+    });
+
+    // ---- price them for real, one at a time ----
+    // Swiggy gives an account ONE cart. update_food_cart overwrites it, so this
+    // cannot be parallelised: two workers would stomp each other and we would
+    // report a price for a cart that no longer exists. Serial, streamed.
     emit({ type: "tool", name: "deals", state: "run" });
-    emit({ type: "log", msg: `PAY CAP Rs ${budget} // staging real carts to find the true price`, cls: "fire" });
+    emit({ type: "log", msg: `PAY CAP Rs ${budget} // staging real carts (one at a time: Swiggy has one cart)`, cls: "fire" });
 
-    const priced = [];
-    const menuOf = new Map(menus.map((m) => [m.rest.id, m]));
-    const cheapestPerRest = new Map();
-    for (const m of [...meals].sort((a, b) => a.itemTotal - b.itemTotal)) {
-      if (!cheapestPerRest.has(m.restaurant.id)) cheapestPerRest.set(m.restaurant.id, m);
-    }
-    const round1 = [...cheapestPerRest.values()]
-      .sort((a, b) => (b.hero ? 1 : 0) - (a.hero ? 1 : 0) || b.restaurant.rating - a.restaurant.rating)
-      .slice(0, PROBE_KITCHENS);
+    const menuOf = new Map(kitchens.map((m) => [m.rest.id, m]));
+    const probes = carts.slice(0, PROBE_CARTS);
+    let bestPay = Infinity, underCount = 0;
 
-    // Staging carts back to back makes Swiggy's endpoint throw transport errors.
-    // Breathe between probes, and give a failed one a second chance before we
-    // write the kitchen off.
-    const priceWithRetry = async (m, menuItems) => {
-      try { return await huntBestPrice(call, addr.id, m, menuItems, veg, emit); }
-      catch (e) {
-        if (!/Streamable HTTP|POSTing|fetch failed|socket/i.test(String(e?.message || e))) throw e;
-        emit({ type: "log", msg: `  transport hiccup // retrying ${m.restaurant.name}`, cls: "sys" });
-        await sleep(1500);
-        return await huntBestPrice(call, addr.id, m, menuItems, veg, emit);
-      }
-    };
-
-    // One hunt per kitchen: stage, chase the coupon threshold, keep the cheapest
-    // real bill it can reach.
-    for (let i = 0; i < round1.length; i++) {
-      const m = round1[i];
+    for (let i = 0; i < probes.length; i++) {
+      const m = probes[i];
       const menu = menuOf.get(m.restaurant.id);
-      emit({ type: "verify", i: i + 1, n: round1.length, name: m.restaurant.name });
-      emit({ type: "log", msg: `  staging real cart at <span class="k">${m.restaurant.name}</span>`, cls: "" });
+      emit({ type: "verify", i: i + 1, n: probes.length, name: m.restaurant.name });
       try {
-        const r = await priceWithRetry(m, menu ? menu.items : []);
+        let r;
+        try { r = await huntBestPrice(call, addr.id, m, menu ? menu.items : [], veg, emit); }
+        catch (e) {
+          if (!/Streamable HTTP|POSTing|fetch failed|socket/i.test(String(e?.message || e))) throw e;
+          await sleep(1500);
+          r = await huntBestPrice(call, addr.id, m, menu ? menu.items : [], veg, emit);
+        }
         const pay = r.bill.toPay || 0;
         if (!pay) continue;
         const under = pay <= budget;
-        priced.push({
-          ...m,
-          items: r.items,
-          itemTotal: r.bill.itemTotal || m.itemTotal,
-          pay, basePay: r.basePay,
+        if (under) underCount++;
+        if (pay < bestPay) bestPay = pay;
+
+        emit({
+          type: "priced", id: m.id,
+          pay, itemTotal: r.bill.itemTotal || m.itemTotal, taxes: r.bill.taxes,
           coupon: r.applied ? r.applied.code : "", saved: r.applied ? r.applied.saved : 0,
-          taxes: r.bill.taxes, delivery: r.bill.delivery, under,
+          under, items: r.items,
         });
         if (r.applied) emit({ type: "deal", tag: r.applied.code, name: `${m.restaurant.name} // real`, gold: true, save: r.applied.saved });
         emit({
@@ -688,55 +817,21 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
           cls: under ? "win" : "sys",
         });
       } catch (e) {
-        emit({ type: "log", msg: `  hunt failed // ${m.restaurant.name} // ${String(e?.message || e).split("\n")[0].slice(0, 70)}`, cls: "sys" });
+        emit({ type: "priced", id: m.id, failed: true });
+        emit({ type: "log", msg: `  could not price // ${m.restaurant.name}`, cls: "sys" });
       }
-
-      // VALUE PICK: this kitchen's own discounted dish. No coupon will ever stack
-      // on it, but it is often the cheapest thing you can actually pay for.
-      const deal = (menu ? menu.items : [])
-        .map((i) => ({ ...i, kind: classify(i) }))
-        .filter((i) => i.kind === "main" && isOfferItem(i) && i.price > 0 && i.price <= budget * 1.6 && (veg ? isVeg(i.tags) : true))
-        .sort((a, b) => a.price - b.price)[0];
-      if (deal) {
-        try {
-          await sleep(300);
-          const one = [{ name: deal.name, price: deal.price, kind: "main", emoji: emojiFor(deal.name + " " + deal.cat), menu_item_id: deal.id, quantity: 1, veg: isVeg(deal.tags) }];
-          const r = await priceCart(call, addr.id, m.restaurant.id, one);
-          const pay = r.bill.toPay || 0;
-          if (pay) {
-            const under = pay <= budget;
-            priced.push({
-              label: "VALUE PICK", hero: "ON OFFER", items: one,
-              restaurant: m.restaurant, itemTotal: r.bill.itemTotal || deal.price,
-              pay, basePay: pay, coupon: "", saved: 0,
-              taxes: r.bill.taxes, delivery: r.bill.delivery, under,
-            });
-            emit({
-              type: "log",
-              msg: `  ${under ? "<span class='k'>UNDER CAP</span>" : "over cap"} // ${m.restaurant.name} value pick <span style="color:var(--gold)">Rs ${pay}</span> (already discounted, no coupon possible)`,
-              cls: under ? "win" : "sys",
-            });
-          }
-        } catch { /* value pick is a bonus, never fatal */ }
-      }
-      await sleep(400);
+      await sleep(350);
     }
 
     try { await call("flush_food_cart", {}); } catch {}
     emit({ type: "tool", name: "deals", state: "done" });
     emit({ type: "log", msg: `cart flushed // nothing ordered`, cls: "sys" });
-
-    const under = priced.filter((p) => p.under).sort((a, b) => a.pay - b.pay);
-    const over = priced.filter((p) => !p.under).sort((a, b) => a.pay - b.pay);
-    if (!under.length) {
-      emit({ type: "log", msg: `nothing lands under Rs ${budget} // cheapest real price was Rs ${over[0] ? over[0].pay : "?"}`, cls: "fire" });
-    } else {
-      emit({ type: "log", msg: `<span class="k">${under.length}</span> meals actually cost under Rs ${budget} // cheapest Rs ${under[0].pay}`, cls: "win" });
-    }
     emit({
-      type: "combos", orderable: true, verified: true,
-      addressId: addr.id, addressLabel: addr.tag || "addr", budget,
-      combos: [...under, ...over.slice(0, 6)],
+      type: "log",
+      msg: underCount
+        ? `<span class="k">${underCount}</span> carts really cost under Rs ${budget} // cheapest Rs ${bestPay}`
+        : `nothing landed under Rs ${budget} // cheapest real price was Rs ${bestPay === Infinity ? "?" : bestPay}`,
+      cls: underCount ? "win" : "fire",
     });
     emit({ type: "done" });
   } catch (e) {
