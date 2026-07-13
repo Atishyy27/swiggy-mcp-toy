@@ -612,29 +612,32 @@ function buildMealClearing(items, query, threshold, veg, rest) {
   };
 }
 
-function newClient(server) {
-  const provider = new FileOAuthProvider(server);
+// `auth` is an OAuthClientProvider. The public multi-user server injects a
+// session-scoped one so tokens never leak between visitors; local single-user
+// callers pass nothing and get the file-backed store, exactly as before.
+function newClient(server, auth) {
+  const provider = auth || new FileOAuthProvider(server);
   const transport = new StreamableHTTPClientTransport(new URL(SERVERS[server]), { authProvider: provider });
   const client = new Client({ name: "feastmode-agent", version: "0.2.0" }, { capabilities: {} });
   return { provider, transport, client };
 }
-async function withClient(server, fn) {
-  const { provider, transport, client } = newClient(server);
+async function withClient(server, fn, auth) {
+  const { provider, transport, client } = newClient(server, auth);
   if (!provider.tokens()) throw new Error(`not connected (${server})`);
   await client.connect(transport);
   try { return await fn(client); } finally { await client.close(); }
 }
 
-export async function listAddresses({ server = "food" }) {
+export async function listAddresses({ server = "food", auth }) {
   return withClient(server, async (c) =>
-    parseAddresses(textOf(await c.callTool({ name: "get_addresses", arguments: { page: 1, pageSize: 10 } }))));
+    parseAddresses(textOf(await c.callTool({ name: "get_addresses", arguments: { page: 1, pageSize: 10 } }))), auth);
 }
 
 // Stage the picked formation in the REAL cart, then hunt REAL coupons against
 // that REAL cart and keep whichever one actually lowers the bill. Fully
 // reversible via cancelOrder(). Nothing is placed here.
-export async function stageOrder({ server = "food", addressId, restaurantId, items, merge = true }) {
-  if (server === "instamart") return stageInstamart({ addressId, items, merge });
+export async function stageOrder({ server = "food", addressId, restaurantId, items, merge = true, auth }) {
+  if (server === "instamart") return stageInstamart({ addressId, items, merge, auth });
   return withClient(server, async (c) => {
     const call = (name, args) => c.callTool({ name, arguments: args });
 
@@ -682,7 +685,7 @@ export async function stageOrder({ server = "food", addressId, restaurantId, ite
       .slice(0, 6);
 
     return { bill, basePay, applied, locked, tried, offersFound: offers.length, cart: cartText.split("Cart widget")[0].trim().slice(0, 1200) };
-  });
+  }, auth);
 }
 
 // Instamart's update_cart REPLACES the whole cart, which means the naive call
@@ -692,7 +695,7 @@ export async function stageOrder({ server = "food", addressId, restaurantId, ite
 //
 // Out-of-stock lines are dropped on the way through. Swiggy excludes them from
 // checkout anyway, and echoing them back into update_cart just re-poisons the cart.
-async function stageInstamart({ addressId, items, merge }) {
+async function stageInstamart({ addressId, items, merge, auth }) {
   return withClient("instamart", async (c) => {
     const call = (name, args) => c.callTool({ name, arguments: args });
 
@@ -732,23 +735,23 @@ async function stageInstamart({ addressId, items, merge }) {
         .join("\n")
         .slice(0, 1200),
     };
-  });
+  }, auth);
 }
 
-export async function placeOrder({ server = "food", addressId, note }) {
+export async function placeOrder({ server = "food", addressId, note, auth }) {
   if (server === "instamart") {
     return withClient("instamart", async (c) =>
-      textOf(await c.callTool({ name: "checkout", arguments: { addressId, paymentMethod: "CASH" } })));
+      textOf(await c.callTool({ name: "checkout", arguments: { addressId, paymentMethod: "CASH" } })), auth);
   }
   return withClient(server, async (c) => {
     const args = { addressId, paymentMethod: "Cash" };
     if (note) args.noteToRestaurant = note;
     return { result: textOf(await c.callTool({ name: "place_food_order", arguments: args })).slice(0, 1200) };
-  });
+  }, auth);
 }
-export async function cancelOrder({ server = "food" }) {
+export async function cancelOrder({ server = "food", auth }) {
   const tool = server === "instamart" ? "clear_cart" : "flush_food_cart";
-  return withClient(server, async (c) => ({ result: textOf(await c.callTool({ name: tool, arguments: {} })).slice(0, 400) }));
+  return withClient(server, async (c) => ({ result: textOf(await c.callTool({ name: tool, arguments: {} })).slice(0, 400) }), auth);
 }
 
 // search_restaurants only answers CUISINE or restaurant-name queries. Give it a
@@ -799,8 +802,8 @@ async function findRestaurants(call, addrId, query, emit) {
   return { rests: [...byId.values()], used: used || query };
 }
 
-export async function runLiveMission({ server = "food", query, budget = 800, addressId, veg = 0, emit }) {
-  const { provider, transport, client } = newClient(server);
+export async function runLiveMission({ server = "food", query, budget = 800, addressId, veg = 0, emit, auth }) {
+  const { provider, transport, client } = newClient(server, auth);
   if (!provider.tokens()) { emit({ type: "error", msg: `not connected // CONNECT SWIGGY (${server})` }); return false; }
   try {
     await client.connect(transport);

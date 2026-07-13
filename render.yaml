@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: feastmode
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Multi-user mode: per-session in-memory tokens, ordering hard-disabled.
+      - key: FEASTMODE_PUBLIC
+        value: "1"
+      # Must be the exact public origin Render serves, with no trailing slash.
+      # The OAuth redirect becomes <PUBLIC_ORIGIN>/oauth/callback, and Swiggy has
+      # to whitelist it or authorization is rejected. Set after the first deploy,
+      # once Render has assigned the hostname.
+      - key: PUBLIC_ORIGIN
+        sync: false
