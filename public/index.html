@@ -529,11 +529,16 @@ let count={kitchens:0,deals:0,calls:0},total=0,saved=0,lastQuery="";
 /* ===================== budget + chips + mode ===================== */
 $("#budget").addEventListener("input",e=>{budget=+e.target.value;$("#budgetVal").textContent="Rs "+budget;});
 $("#chips").addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){$("#craving").value=c.dataset.q;$("#craving").focus();}});
+let modePinned=false; // true once the user picks a mode by hand
 $("#modeToggle").addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b||busy)return;
-  MODE=b.dataset.mode;[...$("#modeToggle").children].forEach(x=>x.classList.toggle("active",x===b));
+  modePinned=true;setMode(b.dataset.mode);
   if(MODE==="live"&&!connected)toast("LIVE mode // click CONNECT SWIGGY to use the real MCP");
 });
+function setMode(m){
+  MODE=m;
+  [...$("#modeToggle").children].forEach(x=>x.classList.toggle("active",x.dataset.mode===m));
+}
 
 /* vertical switcher */
 $("#vertSwitch").addEventListener("click",e=>{
@@ -567,8 +572,13 @@ async function refreshConn(){
     const r=await fetch(`/api/auth/status?server=${SERVER}`);const d=await r.json();
     connected=!!d.connected;
     setConn(connected?"on":"", connected?`CONNECTED // ${SERVER.toUpperCase()}`:"CONNECT SWIGGY");
-    if(connected)loadAddresses();
-  }catch(e){connected=false;setConn("","CONNECT (start server)");}
+    if(connected){
+      loadAddresses();
+      // If you are connected, the real MCP is the point. Do not silently sit in
+      // DEMO and hand back synthetic kitchens that look real.
+      if(!modePinned&&MODE!=="live"){setMode("live");toast("connected // LIVE mode on, using the real Swiggy MCP");}
+    }else if(!modePinned){setMode("demo");}
+  }catch(e){connected=false;setConn("","CONNECT (start server)");if(!modePinned)setMode("demo");}
 }
 connBtn.addEventListener("click",async()=>{
   if(connected){await fetch(`/api/auth/logout?server=${SERVER}`);toast(`disconnected ${SERVER}`);return refreshConn();}
@@ -695,11 +705,25 @@ async function launch(){
   $("#saveVal").textContent="Rs 0";$("#totalVal").textContent="Rs 0";$("#gauge").style.width="0%";
 
   try{
-    if(MODE==="live"){const ok=await tryLive(q);if(aborted)return;if(ok){finish();return;}toast("LIVE unavailable // running simulation");}
+    if(MODE==="live"){
+      if(!connected){log("not connected // click CONNECT SWIGGY for real data","fire");toast("not connected // running simulation");}
+      else{
+        const ok=await tryLive(q);
+        if(aborted)return;
+        if(ok){finish();return;}
+        log("LIVE stream failed // falling back to SIMULATION","fire");
+        toast("LIVE unavailable // running simulation");
+      }
+    }
+    if(MODE!=="live")log("SIMULATION // synthetic kitchens and deals // switch to LIVE for real Swiggy data","fire");
     await runSim(q);
     if(aborted)return;
-    finish();
-  }catch(e){ if(!aborted)console.error(e); }
+  }catch(e){
+    // A crash must never leave the mission stuck on RUNNING with the timer ticking.
+    if(!aborted){console.error(e);log("mission error // "+(e&&e.message||e),"fire");toast("mission error // see console");}
+  }finally{
+    if(!aborted)finish();
+  }
 }
 
 function goHome(){
@@ -776,7 +800,7 @@ function demoCombos(q,budget){
   const byC=[...pool].sort((a,b)=>craving(b)-craving(a)||b.price-a.price);
   const byBig=[...pool].sort((a,b)=>b.price-a.price),bySmall=[...pool].sort((a,b)=>a.price-b.price);
   const raw=[];
-  const kitchens=shuffle(V.stores).slice(0,5);
+  const kitchens=shuffle(VERTICALS[SERVER].stores).slice(0,5);
   const shapes=[["CRAVING MATCH",byC],["BIG MAINS",byBig],["MAX VARIETY",bySmall],["WILDCARD",rot(byC,2)],["STACKED",rot(byBig,1)],["BESTSELLERS",rot(byC,1)]];
   shapes.forEach(([label,arr],i)=>{
     const f=fill(arr);
