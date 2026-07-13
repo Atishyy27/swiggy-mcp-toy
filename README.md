@@ -1,136 +1,230 @@
 # swiggy-mcp-toy // FEASTMODE
 
-Give an AI agent a craving and a budget. Watch it raid real kitchens, crack real
-coupons, and build a cart in real time - on **Swiggy's official MCP**. A neon
-mission-control UI, plus a clean client that does the full OAuth handshake and
-drives the real tools.
+A deal oracle built on **Swiggy's official MCP servers**. You give it a craving and
+a cap. It answers one question: *where is money being left on the table right now?*
 
-Not affiliated with Swiggy. Free to prototype on `localhost` (no approval needed);
-production / real transactions are gated (India-only, invite-led).
+Every claim it makes shows the arithmetic that produced it, so you can check it
+with a calculator. That is deliberate. A tool that says "great deal!" is worthless;
+a tool that says `Rs 20 / 40g = Rs 0.500 vs Rs 0.345, +45%` can be proven wrong.
+
+Not affiliated with Swiggy. Free to prototype on `localhost`; production and real
+transactions are gated by Swiggy (India-only, invite-led).
 
 ```bash
 npm install
-npm run ui      # then open http://localhost:3000  -> click CONNECT SWIGGY
+npm run ui      # http://localhost:3000  -> CONNECT SWIGGY
 ```
 
-## What you get
+---
 
-- **FEASTMODE UI** (`public/index.html`) - the shareable showpiece.
-  - **DEMO mode**: fully client-side, no login, no keys. Instantly playable.
-  - **LIVE mode**: streams a real mission from your connected Swiggy account.
-- **In-app OAuth**: one **CONNECT SWIGGY** button. Popup phone+OTP login, the
-  backend catches the callback and saves a ~5-day token. No terminal needed.
-- **LIVE TOOLS browser**: once connected, see the real tool schemas (names,
-  params, required flags) straight from the MCP.
-- **Three verticals**: Food / Instamart / Dineout, each its own MCP server and
-  its own connection.
-- **CLI client** (`src/*.mjs`): `login`, `tools`, `order` scripts if you prefer
-  the terminal.
+## The one thing worth knowing
 
-## The three MCP servers
+Swiggy sells the same Lay's Classic Salted at **Rs 20 for 58g** and **Rs 20 for
+40g**. Same price. Same shelf. One bag is 45% more chips.
 
-| Vertical  | Endpoint                       | Live tools |
-|-----------|--------------------------------|-----------|
-| Food      | `https://mcp.swiggy.com/food`  | 18 |
-| Instamart | `https://mcp.swiggy.com/im`    | 14 |
-| Dineout   | `https://mcp.swiggy.com/dineout` | 8 |
+```
+Lay's (Classic Salted) Crunchy Potato Chips
+   58 g   Rs 20   Rs 0.345/g   <- buy this
+   40 g   Rs 20   Rs 0.500/g   +45% per gram
+```
 
-Auth server `https://mcp.swiggy.com/auth` - OAuth 2.1 + PKCE (S256), dynamic
-client registration (public `client_id: swiggy-mcp`), scopes
-`mcp:tools mcp:resources mcp:prompts`, ~5-day token, refresh supported.
+Nobody divides fifty prices by fifty pack weights in their head. A computer does it
+in one round trip. That is the entire edge, and it is the thing this repo exists to
+demonstrate.
 
-### Real Food tools (pulled live)
+---
 
-`get_addresses`, `search_restaurants`, `search_menu`, `get_restaurant_menu`,
-`get_food_cart`, `update_food_cart`, `flush_food_cart`, `place_food_order`,
-`fetch_food_coupons`, `apply_food_coupon`, `get_food_orders`,
-`get_food_order_details`, `track_food_order`, `get_food_delivery_status`,
-`get_payment_options`, `check_payment_status`, `confirm_order`, `report_error`.
+## The three MCP servers, and how they differ
 
-Every ordering tool needs an `addressId` from `get_addresses` - that is your
-delivery location. Payments are not COD-only: there is a full UPI flow
-(`get_payment_options` / `check_payment_status` / `confirm_order`).
+| Vertical  | Endpoint                         | Tools | Speaks   | Discounts are |
+|-----------|----------------------------------|-------|----------|---------------|
+| Food      | `https://mcp.swiggy.com/food`     | 18    | markdown | cart-bound, must be probed |
+| Instamart | `https://mcp.swiggy.com/im`       | 14    | **JSON** | published up front |
+| Dineout   | `https://mcp.swiggy.com/dineout`  | 8     | ?        | not yet explored |
 
-## How LIVE mode works
+Shared auth server at `https://mcp.swiggy.com/auth`. OAuth 2.1 + PKCE (S256),
+dynamic client registration, public client (`token_endpoint_auth_method: none`),
+scopes `mcp:tools mcp:resources mcp:prompts`, roughly a 5-day token, refresh
+supported. One token per vertical, so you log in to each separately.
 
-You type a craving, set a budget cap, pick a saved address. The agent then
-returns **every combination that fits the cap**, across every kitchen it can
-reach, and you pick one.
+**That "Speaks" column is the whole architecture.** Food replies in em-dash
+markdown that you regex. Instamart replies in structured JSON. Feeding one to the
+other's parser matches nothing and returns zero results with no error, which is
+exactly the bug that made Instamart look broken for weeks.
 
-`server.mjs` (SSE) -> `src/agent.mjs`:
+Dump the real schemas yourself:
 
-1. `get_addresses` - your real saved addresses (pick one in the UI).
-2. `search_restaurants` - real restaurants near you (see the gotcha below).
-3. `get_restaurant_menu` for the **top 8 kitchens in parallel**, 2 pages each.
-   A typical hunt scans 300-600 real dishes.
-4. builds every budget-fitting **formation** per kitchen (CRAVING MATCH,
-   BESTSELLERS, BIG MAINS, MAX VARIETY, WILDCARD), dedupes, and ranks by how
-   much of your cap it uses. ~30 formations across ~8 kitchens is normal.
-5. you sort by best value / cheapest / top rated, and pick one.
+```bash
+node src/list-tools.mjs all      # writes schema.<server>.json
+```
 
-### Two gotchas we had to reverse-engineer
+---
 
-Both of these are undocumented and both used to silently break the agent:
+## Two different games, because the servers are different
 
-- **`search_restaurants` only understands cuisines and restaurant names.**
-  Give it a dish or a vague phrase (`veg thali`, `lunch`, `snacks`,
-  `something nice`) and it does not error: it quietly returns *dish* rows with
-  no rating, no ETA, and menu-item ids where restaurant ids should be. That is
-  why a real Bengaluru hunt showed zero restaurants. The agent now maps the
-  craving onto a cuisine (`thali` -> `north indian`) and keeps `restaurant` as a
-  net that always catches, while the original words still rank dishes inside the
-  menus.
-- **Coupons are cart-bound.** `fetch_food_coupons` returns 0 coupons until a
-  cart exists, and the codes it hands back are the display names (`FLAT135`),
-  not the UUIDs in the `code:` field. Eligibility is decided per cart, per item,
-  server-side, so discounts **cannot** be precomputed at browse time.
+### Instamart: arithmetic (instant, parallel)
 
-### Ordering (2-step, explicit)
+`search_products` hands back `mrp` and `offerPrice` **for every pack size**, in
+JSON, with no cart required. So there is nothing to probe. Divide price by weight
+and the answer falls out. Three things it looks for:
 
-Discovery never orders anything. When you pick a formation and hit
-STAGE CART // HUNT OFFERS:
+- **Same price, more product.** Two packs, identical rupees, one is bigger. No
+  trade-off to weigh, one is simply strictly worse.
+- **Wrong pack size.** `Rs 176 / 100g` vs `Rs 312 / 200g` is a 13% premium per gram
+  for the privilege of buying less.
+- **Cheapest per gram, any brand.** Search "oreo" and the cheapest biscuit per gram
+  is usually *not* an Oreo.
 
-1. **Stage** - `update_food_cart` puts the formation in your real cart. Then,
-   because coupons only exist once a cart does, the agent calls
-   `fetch_food_coupons` and *tries* the plausible ones with `apply_food_coupon`,
-   keeping the first that genuinely lowers TO PAY. `get_food_cart` returns the
-   real bill, which is what the confirm dialog shows. A live example:
-   `Rs 574 -> Rs 436` with a real `FLAT135`. Coupons it could not use are shown
-   as honest "add Rs N to unlock" hints.
-2. **Place** - only if you click PLACE REAL ORDER: `place_food_order`
-   (payment `Cash` / COD). CANCEL runs `flush_food_cart` so nothing lingers.
+Because there is no cart in the loop, every component of a craving is searched in
+parallel. `chips + oreo` is two concurrent calls and finishes in about a second.
 
-So a real order needs two deliberate clicks and shows the real, discounted bill
-first. Instamart generates baskets but ordering is not wired yet.
+### Food: search with an expensive, serial oracle
+
+Food discounts **cannot be precomputed**. `fetch_food_coupons` returns nothing until
+a cart exists, and eligibility is decided server-side, per cart, per item. So the
+only way to learn what a cart really costs is to stage it and ask.
+
+And **Swiggy gives your account exactly one cart.** `update_food_cart` overwrites it.
+So the oracle is strictly serial (about 5s per probe) and cannot be parallelised, no
+matter how many workers you throw at it. The entire skill is therefore *choosing
+which probes to spend*, not running more of them.
+
+---
+
+## What we had to reverse-engineer
+
+All of this is undocumented, all of it verified live, and every one of them was
+silently breaking the agent.
+
+1. **`search_restaurants` only understands cuisines and restaurant names.** Give it a
+   dish or a vague phrase (`veg thali`, `lunch`, `snacks`) and it does not error. It
+   quietly returns *dish* rows with no rating, no ETA, and menu-item ids where
+   restaurant ids should be. That is why a real Bengaluru hunt showed zero
+   restaurants. Fix: map the craving onto a cuisine (`thali` -> `north indian`) and
+   keep `restaurant` as a net that always catches.
+
+2. **Coupons are cart-bound.** Zero coupons until a cart exists. Eight the moment a
+   Rs 149 item is staged.
+
+3. **The coupon code is the display name, not the UUID.** `apply_food_coupon`
+   wants `FLAT135`, not the uuid in the `code:` field.
+
+4. **A coupon row says one of two opposite things.** `Save Rs 200 on this order!` is
+   a DISCOUNT. `Add Rs 159 more to avail this offer` is a SHORTFALL against your
+   *current* cart, not a fixed minimum. Reading the first rupee figure out of either
+   sentence, as we did for a while, means reading a discount as a threshold.
+
+5. **Swiggy refuses a coupon on any cart holding an already-discounted dish.**
+   Categories like `## 99 Store`, `## McSaver`, `## Items starting at 99` are the
+   cheapest items on the menu, so padding a cart with them raises the total *and*
+   blocks the coupon you raised it for. Self-defeating in both directions.
+
+6. **Menu category headers are the best classification signal.** `## Fries & Sides`
+   tells you more about a dish than any amount of guessing from its name.
+
+7. **Egg is tagged `Non-veg`.** So pure-veg filtering works off the tag, not the name.
+
+8. **Prices can be decimal** (`Rs 42.85`). A regex expecting integers drops the row
+   silently, with no error. A non-matching regex is a liar: count what you skipped.
+
+9. **Instamart's `update_cart` REPLACES the whole cart.** Call it naively and you
+   have just destroyed whatever the user had in there. We read the cart first and
+   merge into it.
+
+---
+
+## Knowing when NOT to probe
+
+The interesting part of the Food agent is what it refuses to do.
+
+Crossing a coupon threshold can be worth more than the food it costs to cross it,
+so the cheapest way to buy one sandwich is sometimes to buy two sandwiches. But a
+top-up is dead on arrival in two ways, and both can be ruled out with arithmetic
+*before* spending a single 5-second probe:
+
+- **It cannot pay for itself.** Rs 398 of food to unlock Rs 200 off is a loss with a
+  discount stapled to it.
+- **It cannot land under the cap.** A Rs 550-off coupon on a Rs 563 cart is a fine
+  deal in the abstract and completely useless to someone who came here to pay Rs 150.
+
+The cap is the whole point. A saving you cannot afford is not a saving. So a veg
+sandwich hunt at a Rs 150 cap now says exactly this, and stops:
+
+```
+skip top-up // even with Rs 550 off, a Rs 635 cart still bills about
+             Rs 199, over your Rs 150 cap.
+```
+
+That is an honest "no deal exists here", delivered in 34 seconds instead of ground
+out over 48. Refusing to probe is the skill.
+
+---
+
+## Your cart is your real cart
+
+This is the bit that surprises people. `update_food_cart` and `update_cart` write to
+your **actual Swiggy cart**. Not a sandbox. So the intended flow is:
+
+1. FEASTMODE stages the winning cart.
+2. You open the Swiggy app, and it is already there.
+3. You pay in the app, like normal.
+
+You never have to trust this code with your money. Placing an order from here is a
+separate, deliberate second click (`place_food_order`, COD), and CANCEL runs
+`flush_food_cart` so nothing lingers.
+
+---
+
+## Running it
+
+```bash
+npm install
+npm run ui                    # http://localhost:3000
+
+node src/login.mjs food       # or log in per vertical from the CLI
+node src/login.mjs instamart
+node src/login.mjs dineout
+
+node src/list-tools.mjs all   # dump live tool schemas
+```
+
+Tokens land in `.swiggy/<server>.json`, which is gitignored. Delete it to force a
+fresh login. They last about 5 days.
 
 ## Architecture
 
 ```
-public/index.html   single-file UI (HUD, radar canvas, particles). No framework.
-server.mjs          static server + OAuth flow + SSE + /api/tools. No deps.
-src/oauth-provider.mjs   file-backed OAuth 2.1 + PKCE provider (.swiggy/*.json)
-src/agent.mjs       real LIVE agent over the MCP
-src/login.mjs       CLI login (alternative to the in-app button)
-src/list-tools.mjs  dump live schemas to schema.<server>.json
-src/order-demo.mjs  adaptive search demo (stops before ordering)
+public/index.html        single-file UI. No framework, no build step.
+server.mjs               static server + OAuth + SSE. No deps.
+src/agent.mjs            the Food agent: search, build, probe, gate.
+src/instamart.mjs        the Instamart oracle: parse, divide, rank.
+src/oauth-provider.mjs   OAuth 2.1 + PKCE provider
+src/login.mjs            CLI login
+src/list-tools.mjs       schema dumper
 ```
 
 ## Deploy
 
-The UI is a static folder, so the **DEMO** deploys anywhere. LIVE needs the Node
-backend and your own token, so keep LIVE local (do not host your tokens).
+The public deploy runs the real server so visitors connect their **own** Swiggy
+account. Two things make that safe:
 
-- **GitHub Pages**: pushing to `main` runs `.github/workflows/pages.yml`, which
-  publishes `public/` to `https://atishyy27.github.io/swiggy-mcp-toy/`.
-- **Any static host** (Vercel / Netlify): point it at `public/`.
+- **Tokens are session-scoped**, never shared between visitors and never written to
+  disk.
+- **Ordering is hard-disabled in public mode** (`FEASTMODE_PUBLIC=1`). Staging is
+  allowed, because it only touches the visitor's own cart and is reversible.
+  `place_food_order` returns 403 before it can reach the MCP. No money can move.
 
-On a static deploy the LIVE controls detect the missing backend and show a
-"clone for LIVE" hint instead of erroring.
+Run the real thing locally if you want to actually order.
 
-## Notes / gotchas
+## Honest limits
 
-- `localhost:3000` OAuth callback must be reachable; the redirect uses whatever
-  `PORT` the server started on. `localhost` is whitelisted by Swiggy.
-- Token expires in ~5 days - just click CONNECT again.
-- Delete `.swiggy/` to force a fresh login. Tokens are gitignored.
-- Dineout table booking exists but is not wired into the agent yet.
+- **"Spend more, pay less" is real but rare.** It needs the coupon to beat the
+  padding *plus* tax. It is implemented and detected, but it did not fire in either
+  live test at a Rs 150 cap, and the README will not pretend otherwise.
+- A full Food hunt takes 30-60 seconds, because the oracle is serial and there is no
+  way around that.
+- The Instamart catalog is genuinely live. Run the same query twice and the variant
+  count moves, because items go in and out of stock under you.
+- Dineout is not wired into the agent yet.
+- `oreo shake` currently relaxes to `shake` if the exact phrase misses, and does not
+  yet tell you it did.
