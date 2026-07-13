@@ -108,18 +108,32 @@ const isOfferItem = (i) => OFFER_CAT.test(i.cat || "");
 const FILLER = /water|bottle|\d+\s*(l|ltr|litre|liter)\b|packaged drinking|soda water|ice cubes?|plate|spoon|napkin|carry ?bag/i;
 const isFiller = (i) => FILLER.test(i.name || "");
 
+// A coupon row says one of exactly two things, and they mean opposite things:
+//
+//   CELEBRATIONS [APPLICABLE]      Save Rs 200 on this order!      <- a DISCOUNT
+//   SWIGGYIT     [NOT APPLICABLE]  Add Rs 159 more to avail this   <- a SHORTFALL
+//
+// The old parser took the first rupee figure in either sentence and called it
+// minOrder, so "Save Rs 200" was read as "minimum order Rs 200". That is a
+// discount misread as a threshold, and it sent the top-up logic chasing targets
+// that did not exist. Parse the two sentences separately or do not parse at all.
 const parseCoupons = (t) => {
   const re = new RegExp("-\\s*([A-Z0-9]+)\\s*\\[([^\\]]*)\\]\\s*" + D + "\\s*(.+?)\\s*\\(code:", "g");
   const out = [];
   let m;
   while ((m = re.exec(t))) {
     const desc = m[3].trim();
+    const save = desc.match(/save\s*₹\s*([\d.]+)/i);
+    const add = desc.match(/add\s*₹\s*([\d.]+)\s*more/i);
+    // Codes usually name their own value (FLAT150, FLAT135). Worth a guess when the
+    // coupon is locked, because a locked coupon never tells you what it is worth.
+    const named = m[1].match(/(?:FLAT|SAVE|GET)(\d{2,4})/i);
     out.push({
       code: m[1],
       desc,
       blocked: /NOT APPLICABLE/i.test(m[2]),
-      // "Add Rs 449 more to avail this offer" is really the minimum order value.
-      minOrder: +((desc.match(/₹(\d+)/) || [])[1] || 0),
+      off: save ? Math.round(parseFloat(save[1])) : named ? +named[1] : 0,   // what it SAVES
+      need: add ? Math.round(parseFloat(add[1])) : 0,                        // shortfall vs THIS cart
     });
   }
   return out;
@@ -387,7 +401,7 @@ function buildCarts(items, comps, payCap, veg, rest) {
 //
 // Every number this returns came off a real bill. Leaves the cart staged; the
 // caller flushes.
-async function huntBestPrice(call, addressId, meal, menuItems, veg, emit) {
+async function huntBestPrice(call, addressId, meal, menuItems, veg, emit, budget = 0) {
   const rid = String(meal.restaurant.id);
   const inCart = meal.items.map((i) => ({ ...i }));
 
@@ -421,15 +435,43 @@ async function huntBestPrice(call, addressId, meal, menuItems, veg, emit) {
   let cur = await stage();
   let best = { bill: cur.bill, basePay: cur.bill.toPay, applied: null, cart: cur.text, items: [...inCart] };
 
+  // What the cart you actually asked for costs, before we touch it. Everything
+  // below is measured against this.
+  const baseline = { toPay: cur.bill.toPay, itemTotal: cur.bill.itemTotal, n: inCart.length };
+
+  // The result worth shouting about, and the one nobody reaches by hand: we ADDED
+  // food to the cart and the bill went DOWN. Crossing a coupon threshold can be
+  // worth more than the food it costs to cross it, so the cheapest way to buy one
+  // sandwich is sometimes to buy two sandwiches. You only ever find this by paying
+  // the threshold and re-asking, which is exactly what a human will not do.
+  const withArb = (r) => {
+    const spent = r.bill.itemTotal - baseline.itemTotal;
+    const saved = baseline.toPay - r.bill.toPay;
+    if (spent > 0 && saved > 0) {
+      r.arbitrage = {
+        spent, saved, was: baseline.toPay, now: r.bill.toPay,
+        extra: r.items.slice(baseline.n).map((i) => i.name),
+      };
+      emit({
+        type: "log", cls: "win",
+        msg: `SPEND MORE, PAY LESS // added Rs ${spent} of food, bill fell Rs ${saved} ` +
+          `(Rs ${baseline.toPay} -> <span class="k">Rs ${r.bill.toPay}</span>)`,
+      });
+    }
+    return r;
+  };
+
   for (let round = 0; round <= TOPUP_ROUNDS; round++) {
     const basePay = cur.bill.toPay;
 
     let offers = [];
     try { offers = parseCoupons(textOf(await call("fetch_food_coupons", { addressId, restaurantId: rid }))); } catch {}
 
-    // Try to actually land one. Swiggy refuses coupons on already-discounted
-    // items, so "returned 200" proves nothing: only the bill moving proves it.
-    for (const o of offers.slice(0, 4)) {
+    // Try to actually land one, biggest discount first. Swiggy refuses coupons on
+    // already-discounted items, so "returned 200" proves nothing: only the bill
+    // moving proves it.
+    const live = offers.filter((o) => !o.blocked).sort((a, b) => b.off - a.off);
+    for (const o of live.slice(0, 4)) {
       try {
         await call("apply_food_coupon", { couponCode: o.code, addressId });
         const t = textOf(await call("get_food_cart", { addressId }));
@@ -437,20 +479,20 @@ async function huntBestPrice(call, addressId, meal, menuItems, veg, emit) {
         if (b.toPay && b.toPay < basePay) {
           const hit = { bill: b, basePay, applied: { code: o.code, saved: basePay - b.toPay }, cart: t, items: [...inCart] };
           if (hit.bill.toPay < best.bill.toPay) best = hit;
-          return best;
+          return withArb(best);
         }
       } catch { /* not eligible on these items */ }
     }
     if (cur.bill.toPay < best.bill.toPay) best = { bill: cur.bill, basePay, applied: null, cart: cur.text, items: [...inCart] };
     if (round === TOPUP_ROUNDS) break;
 
-    // Nothing applied. What is the nearest offer still asking for, right now?
-    const need = offers.filter((o) => o.minOrder > 0).sort((a, b) => a.minOrder - b.minOrder)[0];
+    // Nothing applied. What is the nearest locked offer still asking for?
+    const need = offers.filter((o) => o.need > 0).sort((a, b) => a.need - b.need)[0];
     if (!need) break;
 
     // Overshoot: Swiggy quietly marks some dishes down after we stage them, so a
     // cart built to land exactly on the threshold lands just under it instead.
-    const goal = Math.round(need.minOrder * 1.15) + 20;
+    const goal = Math.round(need.need * 1.15) + 20;
     const add = [];
     let got = 0;
     for (const p of pad) {
@@ -459,9 +501,43 @@ async function huntBestPrice(call, addressId, meal, menuItems, veg, emit) {
       add.push(p);
       got += p.price;
     }
-    if (!add.length || got < need.minOrder) break;
+    if (!add.length || got < need.need) break;
 
-    emit({ type: "log", msg: `    ${need.code} wants Rs ${need.minOrder} more // adding ${add.length} item(s) (Rs ${got})`, cls: "sys" });
+    // THE GATE. Swiggy tells us what every coupon is worth, so we can rule a top-up
+    // out with arithmetic instead of buying the answer with four slow cart probes.
+    // Two ways a top-up is dead on arrival, and the second one is the one that
+    // actually bites:
+    //
+    //  1. It cannot pay for itself. Rs 398 of food to unlock Rs 200 off is a loss
+    //     with a discount stapled to it.
+    //  2. It cannot land under the CAP. A Rs 550-off coupon on a Rs 563 cart is a
+    //     fine deal in the abstract and completely useless to someone who came here
+    //     to pay Rs 150. The cap is the whole point; a saving you cannot afford is
+    //     not a saving.
+    const ceiling = Math.max(...offers.map((o) => o.off), 0);
+    if (ceiling && got >= ceiling) {
+      emit({
+        type: "log", cls: "sys",
+        msg: `    skip top-up // reaching ${need.code} costs Rs ${got} but the best coupon ` +
+          `here only saves Rs ${ceiling}. Losing trade.`,
+      });
+      break;
+    }
+    const estPadded = Math.round((cur.bill.itemTotal + got) * 1.18) - ceiling;
+    if (budget && estPadded > budget) {
+      emit({
+        type: "log", cls: "sys",
+        msg: `    skip top-up // even with ${ceiling ? `Rs ${ceiling} off` : "the best coupon"}, ` +
+          `a Rs ${cur.bill.itemTotal + got} cart still bills about Rs ${estPadded}, over your Rs ${budget} cap.`,
+      });
+      break;
+    }
+
+    emit({
+      type: "log", cls: "sys",
+      msg: `    ${need.code} wants Rs ${need.need} more // adding ${add.length} item(s) (Rs ${got})` +
+        (ceiling ? ` to chase Rs ${ceiling}` : ""),
+    });
     for (const p of add) {
       inCart.push({
         name: p.name, price: p.price, kind: p.kind, emoji: emojiFor(p.name + " " + p.cat),
@@ -471,7 +547,7 @@ async function huntBestPrice(call, addressId, meal, menuItems, veg, emit) {
     await sleep(300);
     cur = await stage();
   }
-  return best;
+  return withArb(best);
 }
 
 // Price one cart, no coupon chasing. Used for the VALUE PICK: the kitchen's own
@@ -578,7 +654,9 @@ export async function stageOrder({ server = "food", addressId, restaurantId, ite
     // plausible ones and keep the first that genuinely reduces TO PAY.
     let applied = null;
     const tried = [];
-    const candidates = offers.filter((o) => !o.minOrder || o.minOrder <= bill.itemTotal).slice(0, 6);
+    // Unlocked ones first, richest first. A locked coupon states its shortfall, so
+    // there is no point spending a probe proving it is still locked.
+    const candidates = offers.filter((o) => !o.blocked).sort((a, b) => b.off - a.off).slice(0, 6);
     for (const o of candidates) {
       try {
         await call("apply_food_coupon", { couponCode: o.code, addressId });
@@ -599,7 +677,7 @@ export async function stageOrder({ server = "food", addressId, restaurantId, ite
     // Anything we could not use becomes an honest "unlock" hint.
     const locked = offers
       .filter((o) => !applied || o.code !== applied.code)
-      .map((o) => ({ code: o.code, desc: o.desc, need: Math.max(0, o.minOrder - bill.itemTotal) }))
+      .map((o) => ({ code: o.code, desc: o.desc, off: o.off, need: o.need }))
       .sort((a, b) => a.need - b.need)
       .slice(0, 6);
 
@@ -846,11 +924,11 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
       emit({ type: "verify", i: i + 1, n: probes.length, name: m.restaurant.name });
       try {
         let r;
-        try { r = await huntBestPrice(call, addr.id, m, menu ? menu.items : [], veg, emit); }
+        try { r = await huntBestPrice(call, addr.id, m, menu ? menu.items : [], veg, emit, budget); }
         catch (e) {
           if (!/Streamable HTTP|POSTing|fetch failed|socket/i.test(String(e?.message || e))) throw e;
           await sleep(1500);
-          r = await huntBestPrice(call, addr.id, m, menu ? menu.items : [], veg, emit);
+          r = await huntBestPrice(call, addr.id, m, menu ? menu.items : [], veg, emit, budget);
         }
         const pay = r.bill.toPay || 0;
         if (!pay) continue;
@@ -862,7 +940,7 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
           type: "priced", id: m.id,
           pay, itemTotal: r.bill.itemTotal || m.itemTotal, taxes: r.bill.taxes,
           coupon: r.applied ? r.applied.code : "", saved: r.applied ? r.applied.saved : 0,
-          under, items: r.items,
+          under, items: r.items, arbitrage: r.arbitrage || null,
         });
         if (r.applied) emit({ type: "deal", tag: r.applied.code, name: `${m.restaurant.name} // real`, gold: true, save: r.applied.saved });
         emit({

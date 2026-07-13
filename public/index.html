@@ -994,8 +994,16 @@ function renderCombos(flashId){
       real?(c.under?`<span class="bdg win">under cap</span>`:`<span class="bdg">over cap</span>`)
           :`<span class="bdg est">estimate</span>`,
       c.coupon?`<span class="bdg coup">${c.coupon} -${c.saved}</span>`:"",
+      c.arbitrage?`<span class="bdg hero">spend more, pay less</span>`:"",
       c.items.every(i=>i.veg)?`<span class="bdg win">veg</span>`:"",
     ].filter(Boolean).join("");
+
+    // Crossing a coupon threshold can be worth more than the food it costs to
+    // cross it. When that happens the cart got BIGGER and the bill got SMALLER,
+    // which reads like a typo until you show both numbers.
+    const arb=c.arbitrage
+      ? `<div class="math"><span class="cut">+Rs ${c.arbitrage.spent} of food -&gt; bill Rs ${c.arbitrage.was} to Rs ${c.arbitrage.now}, you pay Rs ${c.arbitrage.saved} LESS</span></div>`
+      : "";
 
     el.innerHTML=`
       <div class="r1">
@@ -1005,7 +1013,8 @@ function renderCombos(flashId){
       <div class="who">${r.name||""}${r.rating?` &middot; ${r.rating}★`:""}${r.eta?` &middot; ${r.eta}m`:""}</div>
       <div class="dish">${c.items.map(it=>`${it.emoji} ${it.name}`).join(" + ")}</div>
       <div class="r2">${badges}</div>
-      ${real?`<div class="math">items ${c.itemTotal} + tax ${c.taxes||0}${c.coupon?` <span class="cut">- ${c.saved}</span>`:""} = <b>Rs ${c.pay}</b></div>`:""}`;
+      ${real?`<div class="math">items ${c.itemTotal} + tax ${c.taxes||0}${c.coupon?` <span class="cut">- ${c.saved}</span>`:""} = <b>Rs ${c.pay}</b></div>`:""}
+      ${arb}`;
     el.addEventListener("click",()=>selectCombo(c,el));
     board.appendChild(el);
   });
@@ -1018,7 +1027,7 @@ function applyPriced(d){
   if(d.failed){c.failed=true;}
   else{
     c.pay=d.pay;c.itemTotal=d.itemTotal;c.taxes=d.taxes;
-    c.coupon=d.coupon;c.saved=d.saved;c.under=d.under;
+    c.coupon=d.coupon;c.saved=d.saved;c.under=d.under;c.arbitrage=d.arbitrage;
     if(d.items&&d.items.length)c.items=d.items;
     if(d.saved){saved+=d.saved;animateVal($("#saveVal"),saved-d.saved,saved,v=>"Rs "+v);}
   }
