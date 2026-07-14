@@ -134,12 +134,28 @@ export function packArbitrage(rows) {
     const overpay = Math.round((worst.unitPrice - best.unitPrice) * worst.qty);
 
     // The purest form of the trick, and the one nobody believes until they look:
-    // the two packs cost the SAME RUPEES and one is simply bigger. There is no
-    // trade-off to weigh, no budget to balance. One of them is strictly worse.
-    const twin = sorted.find((v) => v.price === worst.price && v.qty > worst.qty);
-    const samePrice = twin && twin !== worst
-      ? { price: worst.price, more: Math.round(((twin.qty - worst.qty) / worst.qty) * 100), big: twin, small: worst }
-      : null;
+    // two packs cost the SAME RUPEES and one is simply bigger. No trade-off to weigh,
+    // no budget to balance. One of them is strictly worse.
+    //
+    // This used to only ask whether the WORST variant had a same-price twin, which
+    // is a much narrower question than it sounds. Lay's sells 58g and 40g both at
+    // Rs 20, but 40g is not the worst variant (a Rs 50 twin-pack is), so the best
+    // finding in the whole project was invisible to its own detector. Check EVERY
+    // price group, and keep the widest gap.
+    const byPrice = new Map();
+    for (const v of sorted) {
+      if (!byPrice.has(v.price)) byPrice.set(v.price, []);
+      byPrice.get(v.price).push(v);
+    }
+    let samePrice = null;
+    for (const [price, group] of byPrice) {
+      if (group.length < 2) continue;
+      const big = group.reduce((a, b) => (b.qty > a.qty ? b : a));
+      const small = group.reduce((a, b) => (b.qty < a.qty ? b : a));
+      if (big.qty <= small.qty) continue;
+      const more = Math.round(((big.qty - small.qty) / small.qty) * 100);
+      if (!samePrice || more > samePrice.more) samePrice = { price, more, big, small };
+    }
 
     deals.push({ kind: "pack", best, worst, variants: sorted, premium, overpay, samePrice });
   }
