@@ -868,6 +868,44 @@ function finish(){
   else radarCap.textContent="cart locked";
 }
 
+/* ---- Dineout deal oracle ----
+   Unlike chips, a table has a second axis. 50% off at 3.9 stars and 35% off at 4.4
+   are both defensible and there is no formula that picks between them, so we do not
+   invent one. We show the FRONTIER: the venues that nothing else beats on both
+   discount AND rating. Everything below the line is strictly dominated, and we say
+   so instead of padding the list with it. */
+function showVenues(d){
+  const box=$("#combos");box.style.display="";
+  let h=`<div class="hd">${d.counted} venues scanned // ${d.withOffers} carry an offer that the search response never shows you</div>`;
+
+  h+=`<div class="dsec">the frontier // nothing beats these on both discount and rating</div>`;
+  for(const v of (d.frontier||[])){
+    h+=`<div class="dcard hero">
+      <div class="dt">${v.effective}% off // ${v.rating?v.rating+" star":"unrated"}</div>
+      <div class="dn">${esc(v.name)}</div>
+      <div class="vgrid">
+        <span class="g">OFFER</span><span class="g">${v.effective}%</span>
+        <span class="g">${esc(v.offer)}</span><span class="u">${esc(v.area)} ${esc(v.distance||"")}</span>
+      </div>
+      ${v.cash?`<div class="dsum">${v.flat}% off the bill + ${v.cash}% back later. Cashback is not cash: it is usually capped and usually credit.</div>`:""}
+    </div>`;
+  }
+
+  const dominated=(d.venues||[]).filter(v=>!(d.frontier||[]).some(f=>f.id===v.id));
+  if(dominated.length){
+    h+=`<div class="dsec">strictly worse // something else is cheaper AND better rated</div><div class="dcard"><div class="vgrid">`;
+    for(const v of dominated.slice(0,8))
+      h+=`<span class="b">${v.effective}%</span><span class="b">${v.rating||"unrated"}</span>
+          <span class="b">${esc(String(v.name).slice(0,34))}</span><span class="u">${esc(v.offer)}</span>`;
+    h+=`</div></div>`;
+  }
+  if(!(d.frontier||[]).length)
+    h+=`<div class="dcard"><div class="dn">No venue here is running an offer right now.</div></div>`;
+
+  box.innerHTML=h;
+  radarCap.textContent=`${d.withOffers} venues with offers`;
+}
+
 /* ---- Instamart deal oracle ----
    Food needs a cart to price a coupon. Instamart does not: it publishes mrp and
    offerPrice for every pack size, so the whole edge is arithmetic. Every claim on
@@ -877,6 +915,7 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 
 function showDeals(d){
   orderCtx={orderable:false,addressId:d.addressId||addrId,addressLabel:d.addressLabel||""};
+  if(d.server==="dineout")return showVenues(d);
   const box=$("#combos");box.style.display="";
   const same=(d.packs||[]).filter(p=>p.samePrice);
   const wrong=(d.packs||[]).filter(p=>!p.samePrice);

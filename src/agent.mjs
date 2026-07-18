@@ -12,6 +12,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { FileOAuthProvider, SERVERS } from "./oauth-provider.mjs";
 import { parseData, flattenProducts, packArbitrage, cheapestPerUnit, bestMarkdowns } from "./instamart.mjs";
+import { rankVenues, paretoFrontier } from "./dineout.mjs";
 
 const textOf = (r) => (r?.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -853,6 +854,11 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
   emit({ type: "log", msg: `LIVE // connected to Swiggy ${server.toUpperCase()} MCP`, cls: "win" });
 
   try {
+    // Dineout does not use get_addresses at all. It is coordinate-based, and it has
+    // its own location tool. Calling the food one here is what used to crash it into
+    // the food path and silently fall back to the fake simulation.
+    if (server === "dineout") return await dineout(client, call, query, budget, emit);
+
     emit({ type: "tool", name: "search", state: "run" });
     emit({ type: "log", msg: 'call <span class="k">get_addresses</span>()' });
     const addrs = parseAddresses(textOf(await call("get_addresses", { page: 1, pageSize: 10 })));
@@ -1026,6 +1032,103 @@ export async function runLiveMission({ server = "food", query, budget = 800, add
 // oracle to be careful with here: fan out across every component of the craving in
 // parallel and just divide. The edge is that nobody divides 50 prices by 50 pack
 // weights in their head.
+// Bengaluru. Dineout wants coordinates and get_saved_locations does not return any,
+// so we fall back to a city centroid. This is the one place in the whole agent that
+// guesses, and it says so out loud rather than pretending it knows where you are.
+const FALLBACK_LAT = 12.9585457, FALLBACK_LNG = 77.6524364;
+
+async function dineout(client, call, query, budget, emit) {
+  emit({ type: "tool", name: "search", state: "run" });
+
+  let lat = FALLBACK_LAT, lng = FALLBACK_LNG;
+  try {
+    const loc = await call("get_saved_locations", {});
+    const t = textOf(loc);
+    const m = t.match(/lat[^\d-]*(-?[\d.]+)[^\d-]+(-?[\d.]+)/i);
+    if (m) { lat = +m[1]; lng = +m[2]; }
+    else emit({ type: "log", msg: "get_saved_locations returns no coordinates // using Bengaluru centroid", cls: "sys" });
+  } catch {
+    emit({ type: "log", msg: "get_saved_locations failed // using Bengaluru centroid", cls: "sys" });
+  }
+
+  // search_restaurants_dineout is an autosuggest over restaurant NAMES. Ask it for
+  // "dinner" and it hands back a place called "Snacks & Dinner". So we fan out over
+  // cuisines, which is the only thing it actually understands, exactly like the
+  // food search.
+  const parts = splitCraving(query);
+  const seeds = (parts.length ? parts : [query])
+    .flatMap((q) => [q, CUISINE[q.toLowerCase()]].filter(Boolean));
+  const queries = [...new Set(seeds.length ? seeds : ["cafe"])].slice(0, 4);
+
+  emit({ type: "log", msg: `call <span class="k">search_restaurants_dineout</span> x${queries.length}`, cls: "sys" });
+
+  // No cart, no shared state, so these genuinely parallelise.
+  const batches = await Promise.all(queries.map(async (q) => {
+    const search = { query: q, latitude: lat, longitude: lng };
+    try {
+      const s = await call("search_restaurants_dineout", search);
+      const ids = [...textOf(s).matchAll(/\(ID:\s*(\d+)\)/g)].map((m) => m[1]).slice(0, 8);
+      if (!ids.length) return { q, cards: [] };
+
+      // THE DOOR. search returns text where the rating literally renders as
+      // "[object Object]", empty structuredContent and empty _meta. Every offer on
+      // Dineout is reachable only through render_restaurants_dineout, whose
+      // documented job is to draw a widget. Read the widget.
+      const r = await call("render_restaurants_dineout", { restaurantIds: ids, searches: [search] });
+      return { q, cards: r?.structuredContent?.restaurants || [] };
+    } catch (e) {
+      emit({ type: "log", msg: `  "${q}" failed // ${String(e?.message || e).slice(0, 44)}`, cls: "fire" });
+      return { q, cards: [] };
+    }
+  }));
+  emit({ type: "tool", name: "search", state: "done" });
+
+  const all = [];
+  const seen = new Set();
+  for (const { q, cards } of batches) {
+    emit({ type: "log", msg: `  "${q}" <span class="k">${cards.length}</span> venues`, cls: cards.length ? "hit" : "fire" });
+    emit({ type: "kitchen", name: q });
+    for (const c of cards) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      all.push(c);
+    }
+  }
+  if (!all.length) {
+    emit({ type: "log", msg: "Dineout returned nothing for that", cls: "fire" });
+    emit({ type: "done" });
+    return true;
+  }
+
+  emit({ type: "tool", name: "deals", state: "run" });
+  const venues = rankVenues(all);
+  const frontier = paretoFrontier(venues);
+  emit({ type: "tool", name: "deals", state: "done" });
+
+  emit({
+    type: "log", cls: "sys",
+    msg: `<span class="k">${all.length}</span> venues scanned, <span class="k">${venues.length}</span> carry a real offer ` +
+      `<span style="color:var(--dim)">(none of which appear in the search response)</span>`,
+  });
+  for (const v of frontier.slice(0, 3)) {
+    emit({
+      type: "log", cls: "win",
+      msg: `<span class="k">${v.effective}% off</span> ${v.name} // ${v.rating}★ ${v.area}` +
+        (v.cash ? ` <span style="color:var(--dim)">(${v.flat}% off + ${v.cash}% cashback)</span>` : ""),
+    });
+  }
+
+  emit({
+    type: "deals", server: "dineout", budget,
+    venues: venues.slice(0, 14),
+    frontier: frontier.slice(0, 8),
+    counted: all.length,
+    withOffers: venues.length,
+  });
+  emit({ type: "done" });
+  return true;
+}
+
 async function instamart(client, call, addr, query, budget, veg, emit) {
   const parts = splitCraving(query);
   const queries = parts.length ? parts : [query];
