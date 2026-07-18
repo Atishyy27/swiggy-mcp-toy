@@ -230,6 +230,8 @@ deploying, so treat this as "very likely" rather than proven.
   way around that.
 - The Instamart catalog is genuinely live. Run the same query twice and the variant
   count moves, because items go in and out of stock under you.
-- Dineout is not wired into the agent yet.
+- Dineout ranks venues by a Pareto frontier (rating vs cost), not a single "best" pick —
+  there's no unit-price arbitrage to find in a restaurant booking the way there is in a
+  packaged good.
 - `oreo shake` currently relaxes to `shake` if the exact phrase misses, and does not
   yet tell you it did.
